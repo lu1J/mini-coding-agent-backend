@@ -372,15 +372,15 @@ mini-agent-backend/
 
 ---
 
-## 10. 快速启动
+## 快速启动
 
-### 10.1 创建虚拟环境
+### 1. 创建虚拟环境
 
 ```bash
 python -m venv .venv
 ```
 
-### 10.2 激活虚拟环境
+### 2. 激活虚拟环境
 
 Windows PowerShell：
 
@@ -388,28 +388,79 @@ Windows PowerShell：
 .venv\Scripts\Activate.ps1
 ```
 
-### 10.3 安装依赖
+### 3. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 10.4 配置环境变量
+### 4. 配置环境变量
 
-在项目根目录创建 `.env` 文件：
+项目提供了环境变量模板：
+
+```text
+.env.example
+```
+
+复制模板文件：
+
+```powershell
+copy .env.example .env
+```
+
+然后打开 `.env`，填写自己的 DeepSeek API Key：
 
 ```env
-DEEPSEEK_API_KEY=你的 DeepSeek API Key
+DEEPSEEK_API_KEY=your_real_deepseek_api_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
 ```
 
-注意：`.env` 不应该提交到 Git。
+注意：
 
-### 10.5 启动服务
+```text
+.env 是本地真实配置文件，不能提交到 Git。
+.env.example 是配置模板，可以提交到 Git。
+```
+
+### 5. 初始化 Demo 工作区
+
+本项目的 CodeAgent 会在 `workspace/demo_project` 中执行代码读取、搜索、Git status、Git diff 和语法检查等演示任务。
+
+首次运行项目前，建议执行：
+
+```powershell
+python scripts/setup_demo_workspace.py --reset
+```
+
+或者使用统一开发命令：
+
+```powershell
+python scripts/dev.py setup-demo
+```
+
+该脚本会自动完成：
+
+```text
+创建 demo_project 示例文件
+初始化 demo_project Git 仓库
+创建 baseline commit
+制造可用于 git diff 的未提交改动
+准备 Agent Eval 所需文件
+```
+
+### 6. 启动后端服务
+
+方式一：直接启动
 
 ```bash
 uvicorn main:app --reload
+```
+
+方式二：使用统一开发命令
+
+```powershell
+python scripts/dev.py serve
 ```
 
 启动后访问：
@@ -417,6 +468,137 @@ uvicorn main:app --reload
 ```text
 http://127.0.0.1:8000/docs
 ```
+
+### 7. 健康检查
+
+服务启动后，另开一个终端运行：
+
+```powershell
+python scripts/dev.py health
+```
+
+预期输出：
+
+```text
+HTTP 状态码：200
+服务运行正常
+```
+
+### 8. 运行单元测试
+
+```powershell
+python scripts/dev.py test
+```
+
+等价于：
+
+```powershell
+python -m pytest tests/
+```
+
+当前测试结果：
+
+```text
+23 passed
+```
+
+### 9. 运行 Agent Eval
+
+先确保后端服务正在运行，然后执行：
+
+```powershell
+python scripts/dev.py eval
+```
+
+当前评估结果：
+
+```text
+总任务数：10
+通过：10
+失败：0
+成功率：100.0%
+```
+
+### 10. 运行项目自检
+
+```powershell
+python scripts/dev.py check
+```
+
+项目自检会检查：
+
+```text
+关键文件是否存在
+.env.example 是否存在
+requirements.txt 是否完整
+.gitignore 是否包含关键规则
+pytest 单元测试是否通过
+```
+
+预期结果：
+
+```text
+通过项：5/5
+项目自检通过
+```
+
+---
+
+## 统一开发命令
+
+项目提供统一开发命令入口：
+
+```text
+scripts/dev.py
+```
+
+常用命令如下：
+
+```powershell
+python scripts/dev.py serve       # 启动 FastAPI 服务
+python scripts/dev.py health      # 检查服务健康状态
+python scripts/dev.py test        # 运行 pytest 单元测试
+python scripts/dev.py eval        # 运行 Agent Eval
+python scripts/dev.py check       # 运行项目自检
+python scripts/dev.py setup-demo  # 初始化 demo_project 工作区
+```
+
+这样做可以减少手动记忆命令的成本，也方便项目演示和后续接入 CI/CD。
+
+---
+
+## Demo Workspace 说明
+
+`workspace/demo_project` 是 CodeAgent 的演示工作区。
+
+它用于演示：
+
+```text
+文件读取
+代码搜索
+局部代码读取
+Git status
+Git diff
+语法检查
+文件创建与修改
+```
+
+该目录由脚本自动生成：
+
+```powershell
+python scripts/setup_demo_workspace.py --reset
+```
+
+主项目不会提交 `workspace/demo_project`，原因是：
+
+```text
+demo_project 是可再生的演示环境
+其中包含独立的 .git 仓库
+不同机器上可以通过脚本重新生成
+避免把运行时数据和嵌套 Git 仓库提交到主项目
+```
+
+这保证了项目环境可复现，也避免污染主项目 Git 仓库。
 
 ---
 
