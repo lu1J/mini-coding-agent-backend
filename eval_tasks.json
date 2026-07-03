@@ -1,0 +1,93 @@
+[
+  {
+    "id": "read_lines_math_utils",
+    "name": "读取 math_utils.py 指定行",
+    "message": "请读取 demo_project/math_utils.py 第 1 到 20 行，并解释代码作用。",
+    "max_steps": 5,
+    "expected_status": "finished",
+    "expected_tools_all": ["read_file_lines"],
+    "expected_answer_contains_any": ["multiply", "乘积"]
+  },
+  {
+    "id": "search_hello",
+    "name": "搜索 hello 并读取上下文",
+    "message": "请在 demo_project 中搜索 hello，并读取匹配位置附近代码，说明 /hello 接口做什么。",
+    "max_steps": 8,
+    "expected_status": "finished",
+    "expected_tools_all": ["search_code", "read_file_lines"],
+    "expected_answer_contains_any": ["/hello", "Hello"]
+  },
+  {
+    "id": "git_status",
+    "name": "查看 Git 状态",
+    "message": "请查看 demo_project 的 Git 状态，告诉我当前有哪些修改或新增文件。",
+    "max_steps": 5,
+    "expected_status": "finished",
+    "expected_tools_all": ["get_git_status"],
+    "expected_answer_contains_any": ["Git", "新增", "修改"]
+  },
+  {
+    "id": "py_compile_success",
+    "name": "语法检查成功",
+    "message": "请运行语法检查，确认 demo_project/math_utils.py 是否有语法错误。",
+    "max_steps": 5,
+    "expected_status": "finished",
+    "expected_tools_all": ["run_command"],
+    "expected_step_success": true,
+    "expected_answer_contains_any": ["通过", "没有语法错误", "returncode"]
+  },
+  {
+    "id": "py_compile_missing_file",
+    "name": "语法检查不存在文件",
+    "message": "请调用 run_command 工具执行命令：python -m py_compile demo_project/not_exist.py，cwd 为 .，测试不存在文件时的错误处理。",
+    "max_steps": 5,
+    "expected_status": "finished",
+    "expected_tools_all": ["run_command"],
+    "expected_step_error_type": "command_failed",
+    "expected_answer_contains_any": ["不存在", "No such file", "失败"]
+  },
+  {
+    "id": "create_file_waiting_approval",
+    "name": "创建新文件进入审批",
+    "message": "请调用 write_new_file 工具，在 demo_project 中创建 eval_created_file.py，内容是 print(\"eval\")。",
+    "max_steps": 8,
+    "expected_status": "waiting_approval",
+    "expected_tools_all": ["write_new_file"],
+    "expected_pending_tool": "write_new_file"
+  },
+  {
+    "id": "edit_file_waiting_approval",
+    "name": "修改文件进入审批",
+    "message": "请把 demo_project/math_utils.py 中的函数说明从 返回 a 和 b 的乘积 改成 返回两个数的乘积。",
+    "max_steps": 8,
+    "expected_status": "waiting_approval",
+    "expected_tools_all": ["edit_file"],
+    "expected_pending_tool": "edit_file"
+  },
+  {
+    "id": "read_gitignore",
+    "name": "读取 .gitignore",
+    "message": "请读取 demo_project/.gitignore 第 1 到 20 行，并说明每条规则的作用。",
+    "max_steps": 5,
+    "expected_status": "finished",
+    "expected_tools_all": ["read_file_lines"],
+    "expected_answer_contains_any": ["__pycache__", "*.bak", "忽略"]
+  },
+  {
+    "id": "max_steps_reached",
+    "name": "最大步数限制",
+    "message": "请先查看 demo_project 的文件列表，再读取 main.py，再读取 math_utils.py，再查看 Git 状态，最后运行语法检查并总结。",
+    "max_steps": 1,
+    "expected_status": "max_steps_reached",
+    "expected_tools_any": ["list_files", "read_file", "read_file_lines", "get_git_status", "run_command"]
+  },
+  {
+    "id": "workspace_diff_or_git_diff",
+    "name": "查看代码改动",
+    "message": "请查看 demo_project 当前的 Git diff，并总结 main.py 有哪些改动。",
+    "max_steps": 5,
+    "expected_status": "finished",
+    "expected_tools_all": ["get_git_diff"],
+    "expected_answer_contains_any": ["diff", "main.py", "改动"]
+  }
+]
