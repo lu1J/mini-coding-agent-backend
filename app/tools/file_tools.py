@@ -66,6 +66,18 @@ def safe_resolve_path(path: str) -> Path:
     return target_path
 
 
+def is_git_repo_root(path: Path) -> bool:
+    """
+    判断 path 本身是不是一个 Git 仓库根目录。
+
+    注意：
+    不使用 git 向父目录查找 .git。
+    因为 workspace 里的普通目录如果位于主项目 Git 仓库下面，
+    Git 会自动向上找到主项目 .git，导致状态串到主项目。
+    """
+    return (path / ".git").exists()
+
+
 def should_ignore_path(path: Path) -> bool:
     """
     判断某个文件或目录是否应该被 Agent 忽略。
@@ -786,120 +798,105 @@ def get_workspace_diff() -> str:
 
 def get_git_status(cwd: str = ".") -> str:
     """
-    查看 workspace 中某个 Git 仓库的工作区状态。
+    查看指定 workspace 子目录的 Git 状态。
 
-    相当于执行：
-    git status --short
-
-    参数：
-    - cwd：相对于 workspace 的 Git 仓库目录，例如 demo_project
+    注意：
+    只允许 cwd 本身就是 Git 仓库根目录。
+    防止 Git 自动向上查找到主项目根目录 .git。
     """
-    target_cwd = safe_resolve_path(cwd)
+    try:
+        target_cwd = safe_resolve_path(cwd)
+    except ValueError as e:
+        return f"路径不安全：{e}"
 
     if not target_cwd.exists():
-        return f"工作目录不存在：{cwd}"
+        return f"目录不存在：{cwd}"
 
     if not target_cwd.is_dir():
-        return f"工作目录不是目录：{cwd}"
+        return f"不是目录：{cwd}"
+
+    if not is_git_repo_root(target_cwd):
+        return f"不是 Git 仓库：{cwd}"
 
     try:
-        completed = subprocess.run(
+        result = subprocess.run(
             ["git", "status", "--short"],
             cwd=target_cwd,
             capture_output=True,
             text=True,
-            timeout=10,
             shell=False,
+            timeout=10,
+            check=False,
         )
-    except FileNotFoundError:
-        return "Git 命令不存在，请先确认电脑已安装 Git，并且 git 可以在终端中使用。"
+
+        if result.returncode != 0:
+            return f"Git 状态获取失败：{result.stderr.strip()}"
+
+        output = result.stdout.strip()
+
+        if not output:
+            return "Git 工作区干净：没有未提交修改。"
+
+        return f"Git 工作区状态，目录：{cwd}\n\n{output}"
+
     except subprocess.TimeoutExpired:
-        return "git status 执行超时，已终止。"
-
-    stdout = completed.stdout.strip()
-    stderr = completed.stderr.strip()
-
-    if completed.returncode != 0:
-        return (
-            "git status 执行失败。\n"
-            f"工作目录：{cwd}\n"
-            f"退出码：{completed.returncode}\n"
-            f"错误输出：\n{stderr if stderr else '[无]'}"
-        )
-
-    if not stdout:
-        return "Git 工作区干净：没有未提交修改。"
-
-    return (
-        f"Git 工作区状态，目录：{cwd}\n\n"
-        f"{stdout}"
-    )
+        return "Git 状态获取超时。"
+    except Exception as e:
+        return f"Git 状态获取失败：{e}"
 
 
-def get_git_diff(cwd: str = ".", path: str = ".") -> str:
+def get_git_diff(cwd: str = ".", path: str | None = None) -> str:
     """
-    查看 workspace 中某个 Git 仓库的修改差异。
+    查看指定 Git 仓库中的 diff。
 
-    相当于执行：
-    git diff -- path
-
-    参数：
-    - cwd：相对于 workspace 的 Git 仓库目录，例如 demo_project
-    - path：相对于 cwd 的文件或目录路径，例如 . 或 main.py
+    注意：
+    只允许 cwd 本身就是 Git 仓库根目录。
+    防止 Git 自动向上查找到主项目根目录 .git。
     """
-    target_cwd = safe_resolve_path(cwd)
+    try:
+        target_cwd = safe_resolve_path(cwd)
+    except ValueError as e:
+        return f"路径不安全：{e}"
 
     if not target_cwd.exists():
-        return f"工作目录不存在：{cwd}"
+        return f"目录不存在：{cwd}"
 
     if not target_cwd.is_dir():
-        return f"工作目录不是目录：{cwd}"
+        return f"不是目录：{cwd}"
 
-    # 路径安全检查：path 不能跳出 cwd
-    target_path = (target_cwd / path).resolve()
+    if not is_git_repo_root(target_cwd):
+        return f"不是 Git 仓库：{cwd}"
 
-    try:
-        target_path.relative_to(target_cwd)
-    except ValueError:
-        return "禁止查看 Git 仓库目录之外的 diff。"
+    command = ["git", "diff"]
 
-    if ".." in path or ".env" in path or ":" in path:
-        return "路径被安全策略拒绝。"
+    if path:
+        command.extend(["--", path])
 
     try:
-        completed = subprocess.run(
-            ["git", "diff", "--", path],
+        result = subprocess.run(
+            command,
             cwd=target_cwd,
             capture_output=True,
             text=True,
-            timeout=10,
             shell=False,
+            timeout=10,
+            check=False,
         )
-    except FileNotFoundError:
-        return "Git 命令不存在，请先确认电脑已安装 Git，并且 git 可以在终端中使用。"
+
+        if result.returncode != 0:
+            return f"Git diff 获取失败：{result.stderr.strip()}"
+
+        output = result.stdout.strip()
+
+        if not output:
+            return "当前没有 Git diff。"
+
+        return f"Git diff，目录：{cwd}\n\n{output}"
+
     except subprocess.TimeoutExpired:
-        return "git diff 执行超时，已终止。"
-
-    stdout = completed.stdout.strip()
-    stderr = completed.stderr.strip()
-
-    if completed.returncode != 0:
-        return (
-            "git diff 执行失败。\n"
-            f"工作目录：{cwd}\n"
-            f"路径：{path}\n"
-            f"退出码：{completed.returncode}\n"
-            f"错误输出：\n{stderr if stderr else '[无]'}"
-        )
-
-    if not stdout:
-        return "当前没有 Git diff 改动。"
-
-    max_chars = 12000
-    if len(stdout) > max_chars:
-        stdout = stdout[:max_chars] + "\n\n[git diff 过长，已截断]"
-
-    return stdout
+        return "Git diff 获取超时。"
+    except Exception as e:
+        return f"Git diff 获取失败：{e}"
 
 
 def ensure_gitignore(cwd: str = ".", patterns: list[str] | None = None) -> str:

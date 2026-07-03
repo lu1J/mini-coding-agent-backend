@@ -40,4 +40,7 @@ workspace/test_not_git_project*/
 workspace/**/.git/
 
 # Evaluation output
-eval_result.jsongit status --short
+eval_result.json
+
+# Local API test payloads
+body_stream.json
