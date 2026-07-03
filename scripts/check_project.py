@@ -11,6 +11,8 @@ REQUIRED_FILES = [
     "requirements.txt",
     ".env.example",
     ".gitignore",
+    "Dockerfile",
+    ".dockerignore",
     "README.md",
     "pytest.ini",
     "eval_tasks.json",

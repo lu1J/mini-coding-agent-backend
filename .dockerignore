@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Local environment
+.env
+.venv
+venv
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+
+# IDE
+.idea
+.vscode
+
+# Runtime data
+workspace/.agent_runs
+workspace/.agent_pending
+workspace/demo_project
+eval_result.json
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+body_stream.json
+
+# OS files
+.DS_Store
+Thumbs.db
