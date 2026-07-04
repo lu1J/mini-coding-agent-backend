@@ -19,6 +19,8 @@ REQUIRED_FILES = [
     "docs/SECURITY.md",
     "docs/EVALUATION.md",
     "docs/ROADMAP.md",
+    "VERSION",
+    "CHANGELOG.md",
     "pytest.ini",
     "eval_tasks.json",
     "run_eval.py",
