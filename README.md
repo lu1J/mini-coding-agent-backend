@@ -44,6 +44,20 @@ Agent 架构：原生 Agent Loop + Tool Calling
 ```
 ---
 
+## 项目文档
+
+本项目提供了较完整的工程文档，方便理解接口、架构、安全机制和评估方式。
+
+| 文档 | 说明 |
+|---|---|
+| [API 文档](docs/API.md) | 说明后端接口、请求示例、响应结构和推荐测试顺序 |
+| [架构说明](docs/ARCHITECTURE.md) | 说明 FastAPI、Agent Loop、Tool Runner、工具系统、审批系统和日志系统的整体设计 |
+| [安全机制](docs/SECURITY.md) | 说明 workspace 沙盒、路径限制、敏感文件保护、命令白名单和高风险审批机制 |
+| [评估说明](docs/EVALUATION.md) | 说明 Agent Eval 的任务设计、评估指标、当前结果和后续升级方向 |
+| [路线图](docs/ROADMAP.md) | 说明当前版本完成度、后续迭代计划和长期演进方向 |
+---
+
+
 ## 3. 核心功能
 
 ### 3.1 CodeAgent 代码智能体
@@ -368,19 +382,6 @@ mini-agent-backend/
 ├── .gitignore
 └── README.md
 ```
----
-
-## 项目文档
-
-本项目提供了较完整的工程文档，方便理解接口、架构、安全机制和评估方式。
-
-| 文档 | 说明 |
-|---|---|
-| [API 文档](docs/API.md) | 说明后端接口、请求示例、响应结构和推荐测试顺序 |
-| [架构说明](docs/ARCHITECTURE.md) | 说明 FastAPI、Agent Loop、Tool Runner、工具系统、审批系统和日志系统的整体设计 |
-| [安全机制](docs/SECURITY.md) | 说明 workspace 沙盒、路径限制、敏感文件保护、命令白名单和高风险审批机制 |
-| [评估说明](docs/EVALUATION.md) | 说明 Agent Eval 的任务设计、评估指标、当前结果和后续升级方向 |
-
 ---
 
 ## 项目核心亮点
