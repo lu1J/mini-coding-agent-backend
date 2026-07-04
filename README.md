@@ -30,19 +30,18 @@ Mini Coding Agent Backend 是一个面向代码任务的后端智能体系统，
 
 ## 2. 技术栈
 
-| 类型 | 技术 |
-|---|---|
-| Web 框架 | FastAPI |
-| ASGI 服务 | Uvicorn |
-| 大模型接口 | DeepSeek API，OpenAI-compatible SDK |
-| 配置管理 | python-dotenv |
-| 数据校验 | Pydantic |
-| 工具调用 | Tool Calling / Function Calling |
-| 流式输出 | SSE / StreamingResponse |
-| 测试框架 | pytest |
-| HTTP 调用 | requests |
-| 版本管理 | Git |
-
+```text
+后端框架：FastAPI
+大模型调用：DeepSeek API / OpenAI SDK Compatible API
+Agent 架构：原生 Agent Loop + Tool Calling
+数据校验：Pydantic
+流式输出：Server-Sent Events
+测试框架：pytest
+评估方式：自定义 Agent Eval
+工程脚本：Python scripts
+部署准备：Dockerfile / .dockerignore
+版本管理：Git
+```
 ---
 
 ## 3. 核心功能
