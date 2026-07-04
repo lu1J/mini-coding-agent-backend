@@ -369,6 +369,57 @@ mini-agent-backend/
 ├── .gitignore
 └── README.md
 ```
+---
+
+## 项目文档
+
+本项目提供了较完整的工程文档，方便理解接口、架构、安全机制和评估方式。
+
+| 文档 | 说明 |
+|---|---|
+| [API 文档](docs/API.md) | 说明后端接口、请求示例、响应结构和推荐测试顺序 |
+| [架构说明](docs/ARCHITECTURE.md) | 说明 FastAPI、Agent Loop、Tool Runner、工具系统、审批系统和日志系统的整体设计 |
+| [安全机制](docs/SECURITY.md) | 说明 workspace 沙盒、路径限制、敏感文件保护、命令白名单和高风险审批机制 |
+| [评估说明](docs/EVALUATION.md) | 说明 Agent Eval 的任务设计、评估指标、当前结果和后续升级方向 |
+
+---
+
+## 项目核心亮点
+
+本项目不是简单的 LLM 聊天机器人，而是一个后端优先的 Coding Agent 原型系统。
+
+核心亮点包括：
+
+```text
+1. 原生手写 Agent Loop
+   不直接套壳 LangChain，通过自定义循环实现模型调用、工具调用、工具结果回填和多步推理。
+
+2. Tool Calling 工具闭环
+   模型只负责规划工具调用，后端负责校验和执行工具，避免模型直接操作系统。
+
+3. 受控 Workspace 沙盒
+   所有文件读取、搜索、修改和命令执行都限制在 workspace 目录内，防止越权访问项目外文件。
+
+4. 高风险操作审批机制
+   edit_file、write_new_file、ensure_gitignore 等会修改文件的工具必须经过用户审批后才能执行。
+
+5. 工具风险等级设计
+   将工具划分为 low、medium、high、unknown，方便后续扩展权限控制和前端审批页面。
+
+6. Git 工具隔离
+   get_git_status 和 get_git_diff 只允许作用于独立 Git 仓库根目录，避免 workspace 普通目录误读主项目 Git 状态。
+
+7. SSE 流式执行过程
+   支持实时输出 Agent 执行事件，包括模型调用、工具调用、审批等待、最终回答等过程。
+
+8. 运行日志记录
+   每次 Agent 执行都会保存 run_id、steps、tool_result、status、error 等信息，方便调试和历史追踪。
+
+9. Agent Eval 评估
+   使用固定任务集评估 Agent 是否能稳定完成文件读取、代码搜索、Git 状态查看、命令执行和审批触发等任务。
+
+10. 工程化交付
+    提供 pytest、项目自检脚本、统一开发命令、Demo Workspace 初始化脚本、Dockerfile 和 .dockerignore。
 
 ---
 
@@ -800,33 +851,39 @@ eval_result.json
 
 当前已完成：
 
+## 当前完成度
+
+当前版本已经完成：
+
 ```text
-基础 FastAPI 服务
-DeepSeek API 接入
-Tool Calling
-Agent Loop
-CodeAgent
-文件工具系统
-Git 工具
-人工确认机制
-Approval Resume v1
-SSE 流式执行接口
-Trace 日志
-历史记录接口
+基础 LLM 对话
+普通流式输出
+CodeAgent 主接口
+CodeAgent SSE 流式接口
+文件读取工具
+局部代码读取工具
+代码搜索工具
+文件创建工具
+文件修改工具
+安全命令执行工具
+Git status / Git diff 工具
+高风险操作审批
+工具风险等级
+运行日志记录
+Agent Eval
 pytest 单元测试
-Agent Eval 评估集
-README 初稿
+统一开发命令
+Demo Workspace 初始化
+Docker 部署准备
 ```
 
 ---
 
 ## 17. 后续计划
 
-- 增加更完整的 Agent Resume checkpoint
-- 增加更多代码编辑工具
-- 增加目录创建工具
-- 增加更丰富的测试集
-- 增加 Docker 部署
-- 增加最小演示前端
-- 完善项目截图和演示文档
-- 整理简历项目描述和面试讲解稿
+会话持久化记忆
+上下文压缩
+Self-Reflection 失败自省循环
+代码结构索引
+极简前端演示页面
+LangGraph 状态机版本
