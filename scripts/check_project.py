@@ -15,6 +15,7 @@ REQUIRED_FILES = [
     ".dockerignore",
     "README.md",
     "docs/API.md",
+    "docs/ARCHITECTURE.md",
     "pytest.ini",
     "eval_tasks.json",
     "run_eval.py",
