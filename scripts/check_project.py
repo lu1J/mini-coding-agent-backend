@@ -17,6 +17,7 @@ REQUIRED_FILES = [
     "docs/API.md",
     "docs/ARCHITECTURE.md",
     "docs/SECURITY.md",
+    "docs/EVALUATION.md",
     "pytest.ini",
     "eval_tasks.json",
     "run_eval.py",
