@@ -78,7 +78,7 @@ def test_read_file_blocks_env_file():
     """
     make_demo_file(
         ".env",
-        "DEEPSEEK_API_KEY=fake-key",
+        "DEEPSEEK_API_KEY=your_deepseek_api_key_here",
     )
 
     result = file_tools.read_file(".env")

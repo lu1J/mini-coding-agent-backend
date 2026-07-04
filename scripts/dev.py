@@ -74,6 +74,16 @@ def check() -> int:
     ])
 
 
+def release_check() -> int:
+    """
+    运行 GitHub 发布前安全检查。
+    """
+    return run_command([
+        sys.executable,
+        "scripts/check_release.py",
+    ])
+
+
 def health() -> int:
     """
     检查后端服务是否正常。
@@ -131,6 +141,7 @@ def main():
             "check",
             "health",
             "setup-demo",
+            "release-check",
         ],
         help="要执行的开发命令",
     )
@@ -149,6 +160,8 @@ def main():
         exit_code = health()
     elif args.command == "setup-demo":
         exit_code = setup_demo()
+    elif args.command == "release-check":
+        exit_code = release_check()
     else:
         print(f"未知命令：{args.command}")
         exit_code = 1

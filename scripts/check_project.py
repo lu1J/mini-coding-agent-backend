@@ -22,6 +22,7 @@ REQUIRED_FILES = [
     "eval_tasks.json",
     "run_eval.py",
     "scripts/check_project.py",
+    "scripts/check_release.py",
     "scripts/dev.py",
     "scripts/setup_demo_workspace.py",
     "app/schemas.py",
