@@ -11,6 +11,16 @@ from app.agent.run_logger import list_agent_runs, read_agent_run
 from app.agent.approval_store import read_pending_action, delete_pending_action
 from app.tools.file_tools import AVAILABLE_FILE_TOOLS
 from app.agent.agent_stream import run_code_agent_stream
+from openai import APIConnectionError, APIError, APIStatusError
+
+from app.memory.conversation_store import (
+    create_conversation as store_create_conversation,
+    list_conversations as store_list_conversations,
+    read_conversation as store_read_conversation,
+    append_message as store_append_message,
+    create_or_read_conversation as store_create_or_read_conversation,
+    build_messages_for_llm as store_build_messages_for_llm,
+)
 
 from app.schemas import (
     ChatRequest,
@@ -22,14 +32,101 @@ from app.schemas import (
     AgentRunDetail,
     ApprovalExecuteRequest,
     ApprovalExecuteResponse,
+    ConversationCreateRequest,
+    ConversationCreateResponse,
+    ConversationListResponse,
+    ConversationDetailResponse,
+    ConversationAppendMessageRequest,
+    ConversationAppendMessageResponse,
+    MemoryChatRequest,
+    MemoryChatResponse,
 )
 
 app = FastAPI(title="Mini Agent Backend")
 
 
+MEMORY_CHAT_SYSTEM_PROMPT = """
+你是一个支持多轮会话记忆的 AI 助手。
+
+你需要根据当前用户问题和已有历史消息进行回答。
+如果历史消息中包含用户之前提供的信息，你可以自然地结合上下文。
+不要编造历史中没有出现过的事实。
+如果上下文不足，请直接说明需要更多信息。
+""".strip()
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/conversations", response_model=ConversationCreateResponse)
+def create_conversation_api(request: ConversationCreateRequest):
+    """
+    创建一个新会话。
+    """
+    conversation = store_create_conversation(
+        title=request.title,
+        metadata=request.metadata,
+    )
+
+    return conversation
+
+
+@app.get("/conversations", response_model=ConversationListResponse)
+def list_conversations_api(limit: int = 20):
+    """
+    查看最近会话列表。
+    """
+    safe_limit = max(1, min(limit, 100))
+
+    conversations = store_list_conversations(limit=safe_limit)
+
+    return {
+        "conversations": conversations,
+    }
+
+
+@app.get("/conversations/{conversation_id}", response_model=ConversationDetailResponse)
+def read_conversation_api(conversation_id: str):
+    """
+    查看某个会话详情。
+    """
+    try:
+        return store_read_conversation(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=ConversationAppendMessageResponse,
+)
+def append_conversation_message_api(
+    conversation_id: str,
+    request: ConversationAppendMessageRequest,
+):
+    """
+    向某个会话追加一条消息。
+    """
+    try:
+        message = store_append_message(
+            conversation_id=conversation_id,
+            role=request.role,
+            content=request.content,
+            metadata=request.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "conversation_id": conversation_id,
+        "message": message,
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -69,6 +166,104 @@ def chat_with_history(req: HistoryChatRequest):
 
     answer = llm.chat(messages)
     return ChatResponse(answer=answer)
+
+
+@app.post("/chat/memory", response_model=MemoryChatResponse)
+def chat_with_memory(request: MemoryChatRequest):
+    """
+    带会话记忆的聊天接口。
+
+    - 如果 request.conversation_id 为空：创建新会话
+    - 如果 request.conversation_id 不为空：读取已有会话
+    - 保存用户消息
+    - 携带最近历史消息调用 LLM
+    - 保存助手回复
+    """
+    try:
+        conversation = store_create_or_read_conversation(
+            conversation_id=request.conversation_id,
+            title=request.title or "Memory Chat",
+            metadata={
+                "source": "chat_memory",
+            },
+        )
+
+        conversation_id = conversation["conversation_id"]
+
+        store_append_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=request.message,
+            metadata=request.metadata,
+        )
+
+        messages = store_build_messages_for_llm(
+            conversation_id=conversation_id,
+            system_message=MEMORY_CHAT_SYSTEM_PROMPT,
+            max_messages=request.max_history_messages,
+        )
+
+        answer = llm.chat(
+            messages=messages,
+            max_tokens=request.max_tokens,
+        )
+
+        store_append_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=answer,
+            metadata={
+                "source": "llm",
+            },
+        )
+
+        updated_conversation = store_read_conversation(conversation_id)
+
+        return {
+            "conversation_id": conversation_id,
+            "title": updated_conversation["title"],
+            "answer": answer,
+            "message_count": len(updated_conversation.get("messages", [])),
+        }
+
+
+    except ValueError as exc:
+
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    except FileNotFoundError as exc:
+
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    except APIConnectionError as exc:
+
+        raise HTTPException(
+
+            status_code=502,
+
+            detail="LLM 连接失败，请检查网络、代理或 DeepSeek 配置。",
+
+        ) from exc
+
+    except APIStatusError as exc:
+
+        raise HTTPException(
+
+            status_code=502,
+
+            detail=f"LLM 服务返回错误：HTTP {exc.status_code}",
+
+        ) from exc
+
+    except APIError as exc:
+
+        raise HTTPException(
+
+            status_code=502,
+
+            detail="LLM 调用失败，请稍后重试。",
+
+        ) from exc
 
 
 @app.post("/chat/stream")

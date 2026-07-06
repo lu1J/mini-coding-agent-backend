@@ -30,6 +30,8 @@ REQUIRED_FILES = [
     "scripts/setup_demo_workspace.py",
     "app/schemas.py",
     "app/llm/deepseek_client.py",
+    "app/memory/__init__.py",
+    "app/memory/conversation_store.py",
     "app/agent/agent_loop.py",
     "app/agent/code_agent.py",
     "app/agent/agent_stream.py",
@@ -41,6 +43,8 @@ REQUIRED_FILES = [
     "tests/test_git_tools.py",
     "tests/test_approval_store.py",
     "tests/test_run_logger.py",
+    "tests/test_conversation_store.py",
+    "tests/test_memory_chat_api.py",
 ]
 
 
@@ -64,6 +68,7 @@ REQUIRED_GITIGNORE_PATTERNS = [
     "*.bak",
     "workspace/.agent_runs/",
     "workspace/.agent_pending/",
+    "workspace/.conversations/",
     "workspace/demo_project/",
     "eval_result.json",
 ]

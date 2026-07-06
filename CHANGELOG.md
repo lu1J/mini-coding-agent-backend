@@ -16,6 +16,44 @@ MAJOR.MINOR.PATCH
 
 ### 版本定位
 
+## v0.2.0 - 会话记忆基础版本
+
+### 新增功能
+
+- 新增本地 JSON 会话存储模块，运行时数据保存在 `workspace/.conversations/`。
+- 新增 `conversation_id` 机制，用于区分不同会话。
+- 支持创建会话、读取会话、列出会话、追加消息。
+- 新增会话管理接口：
+  - `POST /conversations`：创建新会话
+  - `GET /conversations`：查看最近会话列表
+  - `GET /conversations/{conversation_id}`：查看某个会话详情
+  - `POST /conversations/{conversation_id}/messages`：向会话追加消息
+- 新增带记忆的聊天接口：
+  - `POST /chat/memory`
+- `/chat/memory` 支持：
+  - 不传 `conversation_id` 时自动创建新会话
+  - 传入 `conversation_id` 时继续已有会话
+  - 自动保存用户消息和助手回复
+  - 自动读取最近历史消息并传给大模型
+- 新增简单滑动窗口机制，用于限制传给大模型的历史消息数量。
+- 新增会话存储模块单元测试。
+- 新增 `/chat/memory` 接口自动化测试。
+- 测试数量从 23 个增加到 33 个。
+
+### 修改内容
+
+- 更新 `scripts/check_project.py`，把 memory 模块和新增测试纳入项目自检。
+- 更新 `.gitignore`，忽略 `workspace/.conversations/` 运行时会话数据。
+- 更新 `.dockerignore`，避免把本地会话数据打包进 Docker 镜像。
+
+### 说明
+
+- 当前版本使用本地 JSON 文件保存会话，方便学习、调试和查看数据结构。
+- 当前还没有使用 Redis、SQLite、PostgreSQL 等数据库。
+- 当前还没有实现摘要记忆、长期记忆、向量记忆和 RAG。
+- 本版本是后续上下文压缩、Summary Memory、长期记忆系统的基础。
+
+
 v0.1.0 是 Mini Coding Agent Backend 的第一个阶段性版本。
 
 该版本目标不是实现最终形态的 Coding Agent，而是完成一个可运行、可测试、可评估、可提交、可继续迭代的基础后端 Agent 系统。

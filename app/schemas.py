@@ -183,3 +183,71 @@ class ApprovalExecuteResponse(BaseModel):
         default=None,
         description="审批执行后继续运行 Agent 的结果"
     )
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str | None = Field(default=None, description="会话标题")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="会话元数据")
+
+
+class ConversationCreateResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    title: str = Field(..., description="会话标题")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="会话元数据")
+
+
+class ConversationMessage(BaseModel):
+    role: str = Field(..., description="消息角色：system/user/assistant/tool")
+    content: str = Field(..., description="消息内容")
+    created_at: str = Field(..., description="创建时间")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="消息元数据")
+
+
+class ConversationListItem(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    title: str = Field(..., description="会话标题")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+    message_count: int = Field(..., description="消息数量")
+
+
+class ConversationListResponse(BaseModel):
+    conversations: list[ConversationListItem]
+
+
+class ConversationDetailResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    title: str = Field(..., description="会话标题")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="会话元数据")
+    messages: list[ConversationMessage]
+
+
+class ConversationAppendMessageRequest(BaseModel):
+    role: str = Field(..., description="消息角色：system/user/assistant/tool")
+    content: str = Field(..., description="消息内容")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="消息元数据")
+
+
+class ConversationAppendMessageResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    message: ConversationMessage
+
+
+class MemoryChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="用户消息")
+    conversation_id: str | None = Field(default=None, description="会话 ID，不传则自动创建")
+    title: str | None = Field(default=None, description="新会话标题")
+    max_tokens: int = Field(default=800, ge=1, le=4000, description="模型最大输出 token 数")
+    max_history_messages: int = Field(default=20, ge=1, le=100, description="最多携带最近多少条历史消息")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="用户消息元数据")
+
+
+class MemoryChatResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    title: str = Field(..., description="会话标题")
+    answer: str = Field(..., description="模型回复")
+    message_count: int = Field(..., description="当前会话消息数量")

@@ -459,3 +459,67 @@ http://127.0.0.1:8000/docs
 ```
 
 查看 FastAPI 自动生成的交互式接口文档。
+
+
+## 会话记忆相关接口
+
+### POST /conversations
+
+创建一个新会话。
+
+主要用途：
+
+- 生成新的 `conversation_id`
+- 初始化会话标题
+- 保存会话元数据
+
+---
+
+### GET /conversations
+
+查看最近会话列表。
+
+主要用途：
+
+- 查看当前本地保存了哪些会话
+- 返回每个会话的标题、创建时间、更新时间和消息数量
+
+---
+
+### GET /conversations/{conversation_id}
+
+查看某个会话的完整详情。
+
+主要用途：
+
+- 根据 `conversation_id` 读取完整会话
+- 查看该会话中的所有 user / assistant 消息
+
+---
+
+### POST /conversations/{conversation_id}/messages
+
+向指定会话追加一条消息。
+
+主要用途：
+
+- 手动向某个会话保存消息
+- 支持 `user`、`assistant`、`system`、`tool` 等角色
+
+---
+
+### POST /chat/memory
+
+带会话记忆的聊天接口。
+
+主要逻辑：
+
+1. 如果请求中没有传入 `conversation_id`，后端会自动创建一个新会话。
+2. 如果请求中传入了 `conversation_id`，后端会继续使用已有会话。
+3. 后端先保存用户消息。
+4. 后端读取最近的历史消息。
+5. 后端把历史消息和当前问题一起发送给大模型。
+6. 大模型返回回复后，后端保存助手消息。
+7. 接口返回 `conversation_id`、回答内容和当前消息数量。
+
+这个接口让项目从“单轮聊天”升级为“支持多轮记忆的聊天”。

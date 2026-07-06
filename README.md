@@ -26,7 +26,7 @@ Mini Coding Agent Backend 是一个面向代码任务的后端智能体系统，
 ## 当前版本
 
 ```text
-v0.1.0
+v0.2.0
 ```
 本项目不是普通聊天机器人，而是一个具备代码工具调用能力的 Agent 后端系统。
 
@@ -160,6 +160,8 @@ POST /agent/approvals/{approval_id}/execute
   "approved": false
 }
 ```
+
+- 会话记忆基础能力：支持 `conversation_id`、本地 JSON 会话持久化、会话管理接口以及 `/chat/memory` 多轮记忆聊天接口。
 
 ---
 
