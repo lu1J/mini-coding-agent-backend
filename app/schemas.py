@@ -217,12 +217,49 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationListItem]
 
 
+class ConversationSummary(BaseModel):
+    content: str = Field(default="", description="会话摘要内容")
+    updated_at: str | None = Field(default=None, description="摘要更新时间")
+    source_message_count: int = Field(default=0, ge=0, description="摘要覆盖的消息数量")
+
+
+class ConversationSummaryResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    summary: ConversationSummary
+
+
+class ConversationUpdateSummaryRequest(BaseModel):
+    content: str = Field(default="", description="新的摘要内容")
+    source_message_count: int | None = Field(default=None, ge=0, description="摘要覆盖的消息数量")
+
+
+class ConversationUpdateSummaryResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    summary: ConversationSummary
+
+
+class ConversationRefreshSummaryRequest(BaseModel):
+    force: bool = Field(default=False, description="是否强制从头重建摘要")
+    max_new_messages: int = Field(default=30, ge=1, le=200, description="本次最多处理多少条新消息")
+    max_tokens: int = Field(default=600, ge=1, le=2000, description="摘要生成最大输出 token 数")
+
+
+class ConversationRefreshSummaryResponse(BaseModel):
+    conversation_id: str = Field(..., description="会话 ID")
+    summary: ConversationSummary
+    refreshed: bool = Field(..., description="本次是否实际刷新了摘要")
+    processed_message_count: int = Field(..., description="本次处理的消息数量")
+    source_message_count: int = Field(..., description="刷新后摘要覆盖的消息数量")
+    reason: str | None = Field(default=None, description="未刷新时的原因")
+
+
 class ConversationDetailResponse(BaseModel):
     conversation_id: str = Field(..., description="会话 ID")
     title: str = Field(..., description="会话标题")
     created_at: str = Field(..., description="创建时间")
     updated_at: str = Field(..., description="更新时间")
     metadata: dict[str, Any] = Field(default_factory=dict, description="会话元数据")
+    summary: ConversationSummary = Field(default_factory=ConversationSummary, description="会话摘要记忆")
     messages: list[ConversationMessage]
 
 

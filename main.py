@@ -20,6 +20,14 @@ from app.memory.conversation_store import (
     read_conversation as store_read_conversation,
     append_message as store_append_message,
     create_or_read_conversation as store_create_or_read_conversation,
+    get_conversation_summary as store_get_conversation_summary,
+    save_conversation_summary as store_save_conversation_summary,
+)
+
+from app.memory.summary_manager import (
+    build_summary_prompt_messages,
+    get_existing_summary_content,
+    get_unsummarized_messages,
 )
 
 from app.schemas import (
@@ -40,6 +48,11 @@ from app.schemas import (
     ConversationAppendMessageResponse,
     MemoryChatRequest,
     MemoryChatResponse,
+    ConversationSummaryResponse,
+    ConversationUpdateSummaryRequest,
+    ConversationUpdateSummaryResponse,
+    ConversationRefreshSummaryRequest,
+    ConversationRefreshSummaryResponse,
 )
 
 app = FastAPI(title="Mini Agent Backend")
@@ -98,6 +111,140 @@ def read_conversation_api(conversation_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get(
+    "/conversations/{conversation_id}/summary",
+    response_model=ConversationSummaryResponse,
+)
+def get_conversation_summary_api(conversation_id: str):
+    """
+    读取某个会话的摘要记忆。
+    """
+    try:
+        summary = store_get_conversation_summary(conversation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "conversation_id": conversation_id,
+        "summary": summary,
+    }
+
+
+@app.put(
+    "/conversations/{conversation_id}/summary",
+    response_model=ConversationUpdateSummaryResponse,
+)
+def update_conversation_summary_api(
+    conversation_id: str,
+    request: ConversationUpdateSummaryRequest,
+):
+    """
+    保存或更新某个会话的摘要记忆。
+    """
+    try:
+        summary = store_save_conversation_summary(
+            conversation_id=conversation_id,
+            content=request.content,
+            source_message_count=request.source_message_count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "conversation_id": conversation_id,
+        "summary": summary,
+    }
+
+
+@app.post(
+    "/conversations/{conversation_id}/summary/refresh",
+    response_model=ConversationRefreshSummaryResponse,
+)
+def refresh_conversation_summary_api(
+    conversation_id: str,
+    request: ConversationRefreshSummaryRequest,
+):
+    """
+    自动刷新某个会话的摘要记忆。
+
+    当前逻辑：
+    - force=False：只摘要还没有被 summary 覆盖的新消息
+    - force=True：从头重新摘要整个会话
+    """
+    try:
+        conversation = store_read_conversation(conversation_id)
+
+        new_messages, start_index, target_source_message_count = get_unsummarized_messages(
+            conversation=conversation,
+            max_new_messages=request.max_new_messages,
+            force=request.force,
+        )
+
+        if not new_messages:
+            summary = store_get_conversation_summary(conversation_id)
+
+            return {
+                "conversation_id": conversation_id,
+                "summary": summary,
+                "refreshed": False,
+                "processed_message_count": 0,
+                "source_message_count": summary.get("source_message_count", 0),
+                "reason": "没有需要摘要的新消息。",
+            }
+
+        existing_summary = "" if request.force else get_existing_summary_content(conversation)
+
+        summary_prompt_messages = build_summary_prompt_messages(
+            existing_summary=existing_summary,
+            new_messages=new_messages,
+            start_index=start_index,
+        )
+
+        summary_content = llm.chat(
+            messages=summary_prompt_messages,
+            max_tokens=request.max_tokens,
+        )
+
+        summary = store_save_conversation_summary(
+            conversation_id=conversation_id,
+            content=summary_content,
+            source_message_count=target_source_message_count,
+        )
+
+        return {
+            "conversation_id": conversation_id,
+            "summary": summary,
+            "refreshed": True,
+            "processed_message_count": len(new_messages),
+            "source_message_count": summary["source_message_count"],
+            "reason": None,
+        }
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except APIConnectionError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="LLM 连接失败，请检查网络、代理或 DeepSeek 配置。",
+        ) from exc
+    except APIStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM 服务返回错误：HTTP {exc.status_code}",
+        ) from exc
+    except APIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="LLM 调用失败，请稍后重试。",
+        ) from exc
 
 
 @app.post(
@@ -198,10 +345,16 @@ def chat_with_memory(request: MemoryChatRequest):
         )
 
         current_conversation = store_read_conversation(conversation_id)
+        summary = current_conversation.get("summary", {})
+        summary_content = ""
+
+        if isinstance(summary, dict):
+            summary_content = summary.get("content", "")
 
         context = build_context_window(
             raw_messages=current_conversation.get("messages", []),
             system_message=MEMORY_CHAT_SYSTEM_PROMPT,
+            summary_message=summary_content,
             max_history_messages=request.max_history_messages,
             max_context_tokens=request.max_context_tokens,
             reserved_output_tokens=request.max_tokens,
@@ -237,6 +390,7 @@ def chat_with_memory(request: MemoryChatRequest):
                 "estimated_input_tokens": context["estimated_input_tokens"],
                 "max_context_tokens": context["max_context_tokens"],
                 "reserved_output_tokens": context["reserved_output_tokens"],
+                "summary_used": context["summary_used"],
             },
         }
 

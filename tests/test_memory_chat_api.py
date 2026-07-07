@@ -134,6 +134,8 @@ def test_chat_memory_creates_conversation_and_calls_llm(tmp_path, monkeypatch):
     assert data["context_stats"]["used_messages"] >= 2
     assert data["context_stats"]["estimated_input_tokens"] > 0
 
+    assert data["context_stats"]["summary_used"] is False
+
 
 def test_chat_memory_continues_existing_conversation(tmp_path, monkeypatch):
     """
@@ -186,3 +188,212 @@ def test_chat_memory_continues_existing_conversation(tmp_path, monkeypatch):
     assert second_data["context_stats"]["total_messages"] >= 4
     assert second_data["context_stats"]["used_messages"] >= 2
     assert second_data["context_stats"]["estimated_input_tokens"] > 0
+
+    assert second_data["context_stats"]["summary_used"] is False
+
+
+def test_conversation_summary_api_and_memory_chat_uses_summary(tmp_path, monkeypatch):
+    """
+    测试 summary API：
+    - 可以保存 summary
+    - 可以读取 summary
+    - /chat/memory 会把 summary 注入上下文
+    """
+    use_temp_conversation_dir(tmp_path, monkeypatch)
+
+    captured = {}
+
+    def fake_chat(messages, max_tokens=800):
+        captured["messages"] = messages
+        return "fake answer with summary"
+
+    monkeypatch.setattr(main.llm, "chat", fake_chat)
+
+    client = TestClient(main.app)
+
+    create_resp = client.post(
+        "/conversations",
+        json={
+            "title": "Summary API Test",
+        },
+    )
+
+    assert create_resp.status_code == 200
+
+    conversation_id = create_resp.json()["conversation_id"]
+
+    update_summary_resp = client.put(
+        f"/conversations/{conversation_id}/summary",
+        json={
+            "content": "用户正在开发 Mini Coding Agent，并且正在实现 Summary Memory。",
+            "source_message_count": 3,
+        },
+    )
+
+    assert update_summary_resp.status_code == 200
+
+    updated_summary = update_summary_resp.json()["summary"]
+
+    assert "Mini Coding Agent" in updated_summary["content"]
+    assert updated_summary["source_message_count"] == 3
+    assert updated_summary["updated_at"] is not None
+
+    get_summary_resp = client.get(
+        f"/conversations/{conversation_id}/summary",
+    )
+
+    assert get_summary_resp.status_code == 200
+
+    summary = get_summary_resp.json()["summary"]
+
+    assert "Summary Memory" in summary["content"]
+
+    chat_resp = client.post(
+        "/chat/memory",
+        json={
+            "conversation_id": conversation_id,
+            "message": "我现在在做什么？",
+        },
+    )
+
+    assert chat_resp.status_code == 200
+
+    data = chat_resp.json()
+
+    assert data["answer"] == "fake answer with summary"
+    assert data["context_stats"]["summary_used"] is True
+
+    sent_messages = captured["messages"]
+
+    summary_messages = [
+        message
+        for message in sent_messages
+        if message["role"] == "system"
+        and "较早对话历史的摘要" in message["content"]
+    ]
+
+    assert len(summary_messages) == 1
+    assert "Mini Coding Agent" in summary_messages[0]["content"]
+
+
+def test_conversation_summary_refresh_api(tmp_path, monkeypatch):
+    """
+    测试 summary refresh API：
+    - 自动读取未摘要消息
+    - 调用 LLM 生成摘要
+    - 保存 summary
+    - 更新 source_message_count
+    """
+    use_temp_conversation_dir(tmp_path, monkeypatch)
+
+    captured = {}
+
+    def fake_chat(messages, max_tokens=600):
+        captured["messages"] = messages
+        captured["max_tokens"] = max_tokens
+        return "用户正在开发 Mini Coding Agent，并且正在实现自动摘要记忆。"
+
+    monkeypatch.setattr(main.llm, "chat", fake_chat)
+
+    client = TestClient(main.app)
+
+    create_resp = client.post(
+        "/conversations",
+        json={
+            "title": "Summary Refresh Test",
+        },
+    )
+
+    assert create_resp.status_code == 200
+
+    conversation_id = create_resp.json()["conversation_id"]
+
+    client.post(
+        f"/conversations/{conversation_id}/messages",
+        json={
+            "role": "user",
+            "content": "我正在开发 Mini Coding Agent。",
+        },
+    )
+
+    client.post(
+        f"/conversations/{conversation_id}/messages",
+        json={
+            "role": "assistant",
+            "content": "好的，我会记住这个项目背景。",
+        },
+    )
+
+    refresh_resp = client.post(
+        f"/conversations/{conversation_id}/summary/refresh",
+        json={
+            "force": False,
+            "max_new_messages": 30,
+            "max_tokens": 500,
+        },
+    )
+
+    assert refresh_resp.status_code == 200
+
+    data = refresh_resp.json()
+
+    assert data["refreshed"] is True
+    assert data["processed_message_count"] == 2
+    assert data["source_message_count"] == 2
+    assert "Mini Coding Agent" in data["summary"]["content"]
+
+    assert captured["max_tokens"] == 500
+    assert captured["messages"][0]["role"] == "system"
+    assert captured["messages"][1]["role"] == "user"
+    assert "新增对话消息" in captured["messages"][1]["content"]
+
+    saved = conversation_store.read_conversation(conversation_id)
+
+    assert saved["summary"]["source_message_count"] == 2
+    assert "自动摘要记忆" in saved["summary"]["content"]
+
+
+def test_conversation_summary_refresh_no_new_messages(tmp_path, monkeypatch):
+    """
+    测试没有新消息时，summary refresh 不会重复调用 LLM。
+    """
+    use_temp_conversation_dir(tmp_path, monkeypatch)
+
+    def fake_chat(messages, max_tokens=600):
+        raise AssertionError("没有新消息时不应该调用 LLM")
+
+    monkeypatch.setattr(main.llm, "chat", fake_chat)
+
+    client = TestClient(main.app)
+
+    create_resp = client.post(
+        "/conversations",
+        json={
+            "title": "No New Summary Test",
+        },
+    )
+
+    conversation_id = create_resp.json()["conversation_id"]
+
+    client.put(
+        f"/conversations/{conversation_id}/summary",
+        json={
+            "content": "已有摘要。",
+            "source_message_count": 0,
+        },
+    )
+
+    refresh_resp = client.post(
+        f"/conversations/{conversation_id}/summary/refresh",
+        json={
+            "force": False,
+        },
+    )
+
+    assert refresh_resp.status_code == 200
+
+    data = refresh_resp.json()
+
+    assert data["refreshed"] is False
+    assert data["processed_message_count"] == 0
+    assert data["reason"] == "没有需要摘要的新消息。"

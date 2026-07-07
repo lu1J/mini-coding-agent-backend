@@ -33,6 +33,7 @@ REQUIRED_FILES = [
     "app/memory/__init__.py",
     "app/memory/conversation_store.py",
     "app/memory/context_manager.py",
+    "app/memory/summary_manager.py",
     "app/agent/agent_loop.py",
     "app/agent/code_agent.py",
     "app/agent/agent_stream.py",
@@ -47,6 +48,7 @@ REQUIRED_FILES = [
     "tests/test_conversation_store.py",
     "tests/test_memory_chat_api.py",
     "tests/test_context_manager.py",
+    "tests/test_summary_manager.py",
 ]
 
 

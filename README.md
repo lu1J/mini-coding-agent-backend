@@ -9,13 +9,13 @@
 ## 1. 当前版本
 
 ```text
-v0.3.0
+v0.4.0
 ```
 
 当前版本为：
 
 ```text
-上下文管理基础版本
+Summary Memory 摘要记忆基础版本
 ```
 
 在 v0.2.0 会话记忆能力的基础上，v0.3.0 新增了 Context Manager，用于控制发送给大模型的历史消息数量和上下文 token 预算。
@@ -249,6 +249,27 @@ POST /agent/approvals/{approval_id}/execute
   "approved": false
 }
 ```
+
+### Summary Memory 摘要记忆
+
+从 v0.4.0 开始，项目支持 Summary Memory 摘要记忆基础能力。
+
+Summary Memory 用于将较早的历史对话压缩成长期摘要，并在后续 `/chat/memory` 请求中作为长期上下文注入模型。
+
+核心接口：
+
+```text
+GET /conversations/{conversation_id}/summary
+PUT /conversations/{conversation_id}/summary
+POST /conversations/{conversation_id}/summary/refresh
+```
+支持能力：
+
+保存会话摘要
+读取会话摘要
+根据未摘要消息自动刷新摘要
+使用 source_message_count 跟踪摘要覆盖到第几条消息
+在 /chat/memory 中通过 summary_used 判断本次是否使用了摘要
 
 ---
 
@@ -1034,28 +1055,11 @@ Docker 部署准备
 
 ---
 
-## 22. 当前限制
-
-当前项目仍然是学习和原型阶段，主要限制包括：
-
-```text
-1. 会话存储仍然使用本地 JSON，不适合生产环境高并发场景。
-2. Context Manager 使用粗略 token 估算，不等同于真实 tokenizer。
-3. Summary Memory 尚未完成。
-4. 长期记忆、向量记忆和 RAG 尚未接入。
-5. 还没有前端页面，主要通过 Swagger、curl、PowerShell 或 Python requests 测试。
-6. 尚未接入 LangGraph 状态机。
-7. 尚未接入 LangSmith / OpenTelemetry 等可观测性平台。
-```
-
----
-
-## 23. 后续计划
+## 22. 后续计划
 
 后续迭代方向：
 
 ```text
-v0.4.0：Summary Memory 摘要记忆基础版
 v0.5.0：Self-Reflection 失败自省循环
 v0.6.0：代码结构索引与更强代码检索
 v0.7.0：极简前端演示页面
@@ -1066,51 +1070,23 @@ v1.0.0：完整 Mini Coding Agent Demo 版本
 
 ---
 
-## 24. 常见问题
+## 23. 版本记录
 
-### 24.1 为什么 DeepSeek 请求失败？
-
-可能原因：
+### v0.4.0
 
 ```text
-1. API Key 错误
-2. .env 没有正确加载
-3. 系统代理配置错误
-4. Git 或 Python 请求走了错误的本地代理端口
-5. 网络无法访问 DeepSeek API
+新增 Summary Memory 摘要记忆基础能力
+新增会话 summary 字段
+支持读取和手动更新会话摘要
+新增 GET /conversations/{conversation_id}/summary 接口
+新增 PUT /conversations/{conversation_id}/summary 接口
+新增 POST /conversations/{conversation_id}/summary/refresh 自动摘要刷新接口
+支持根据 source_message_count 进行增量摘要
+/chat/memory 支持注入 Summary Memory
+context_stats 新增 summary_used 字段
+新增 summary_manager.py
+测试数量增加到 49 passed
 ```
-
-可以先测试：
-
-```powershell
-python -c "import requests; print(requests.get('https://api.deepseek.com', timeout=10).status_code)"
-```
-
-如果返回：
-
-```text
-401
-```
-
-说明网络已经连通，只是该测试请求没有携带 API Key。
-
----
-
-### 24.2 PowerShell 中文显示乱码怎么办？
-
-Windows PowerShell 测试中文 JSON 时可能出现编码问题。可以使用 UTF-8 字节发送请求，或优先使用：
-
-```text
-Swagger UI
-Python requests
-前端页面
-```
-
-也可以用 Python 读取本地 JSON 文件验证真实保存内容。
-
----
-
-## 25. 版本记录
 
 ### v0.3.0
 

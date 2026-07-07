@@ -162,3 +162,39 @@ def test_build_context_window_returns_stats():
     assert context["messages"][0]["role"] == "system"
     assert context["messages"][1]["content"] == "second"
     assert context["messages"][2]["content"] == "third"
+
+
+def test_build_context_window_includes_summary_message():
+    """
+    测试 build_context_window 可以把 summary memory 注入上下文。
+    """
+    raw_messages = [
+        {
+            "role": "user",
+            "content": "recent user message",
+            "created_at": "now",
+            "metadata": {},
+        }
+    ]
+
+    context = build_context_window(
+        raw_messages=raw_messages,
+        system_message="system prompt",
+        summary_message="用户正在开发 Mini Coding Agent 项目，目前在实现摘要记忆。",
+        max_history_messages=10,
+        max_context_tokens=1000,
+        reserved_output_tokens=100,
+    )
+
+    messages = context["messages"]
+
+    assert context["summary_used"] is True
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"] == "system prompt"
+
+    assert messages[1]["role"] == "system"
+    assert "较早对话历史的摘要" in messages[1]["content"]
+    assert "Mini Coding Agent" in messages[1]["content"]
+
+    assert messages[2]["role"] == "user"
+    assert messages[2]["content"] == "recent user message"

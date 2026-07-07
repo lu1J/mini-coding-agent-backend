@@ -524,3 +524,108 @@ http://127.0.0.1:8000/docs
 8. 从 v0.3.0 开始，`/chat/memory` 会通过 Context Manager 构建上下文窗口，并返回 `context_stats`，包括总消息数、实际使用消息数、丢弃消息数和估算输入 token 数。
 
 这个接口让项目从“单轮聊天”升级为“支持多轮记忆的聊天”。
+
+---
+
+## Summary Memory APIs
+
+### GET /conversations/{conversation_id}/summary
+
+读取某个会话的摘要记忆。
+
+#### 请求示例
+
+```text
+GET /conversations/conv_xxxxxxxx_xxxxxxxx_xxxxxxxx/summary
+```
+
+#### 响应示例
+
+```json
+{
+  "conversation_id": "conv_xxxxxxxx_xxxxxxxx_xxxxxxxx",
+  "summary": {
+    "content": "用户正在开发 Mini Coding Agent，目前已经完成会话记忆和上下文管理。",
+    "updated_at": "2026-07-07T09:26:15.979127+00:00",
+    "source_message_count": 6
+  }
+}
+```
+
+---
+
+### PUT /conversations/{conversation_id}/summary
+
+手动保存或更新某个会话的摘要记忆。
+
+#### 请求示例
+
+```json
+{
+  "content": "用户正在开发 Mini Coding Agent，目前已经完成会话记忆和上下文管理。",
+  "source_message_count": 6
+}
+```
+
+#### 响应示例
+
+```json
+{
+  "conversation_id": "conv_xxxxxxxx_xxxxxxxx_xxxxxxxx",
+  "summary": {
+    "content": "用户正在开发 Mini Coding Agent，目前已经完成会话记忆和上下文管理。",
+    "updated_at": "2026-07-07T09:26:15.979127+00:00",
+    "source_message_count": 6
+  }
+}
+```
+
+---
+
+### POST /conversations/{conversation_id}/summary/refresh
+
+自动刷新某个会话的摘要记忆。
+
+#### 请求示例
+
+```json
+{
+  "force": false,
+  "max_new_messages": 30,
+  "max_tokens": 600
+}
+```
+
+#### 参数说明
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `force` | boolean | 是否强制从头重新生成摘要 |
+| `max_new_messages` | integer | 本次最多处理多少条新消息 |
+| `max_tokens` | integer | 摘要生成最大输出 token 数 |
+
+#### 规则说明
+
+```text
+force=false：只摘要还没有被 summary 覆盖的新消息。
+force=true：忽略旧摘要，从头重新生成摘要。
+max_new_messages：本次最多处理多少条新消息。
+max_tokens：摘要生成最大输出 token 数。
+```
+
+#### 响应示例
+
+```json
+{
+  "conversation_id": "conv_xxxxxxxx_xxxxxxxx_xxxxxxxx",
+  "summary": {
+    "content": "项目名称：Mini Coding Agent Backend。当前进度：已完成会话记忆和上下文管理功能，正在实现 Summary Memory 摘要记忆能力。",
+    "updated_at": "2026-07-07T09:26:15.979127+00:00",
+    "source_message_count": 4
+  },
+  "refreshed": true,
+  "processed_message_count": 4,
+  "source_message_count": 4,
+  "reason": null
+}
+```

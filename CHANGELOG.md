@@ -16,6 +16,38 @@ MAJOR.MINOR.PATCH
 
 ### 版本定位
 
+## v0.4.0 - Summary Memory 摘要记忆基础版本
+
+### 新增功能
+
+- 新增会话摘要字段 `summary`，用于保存长期摘要记忆。
+- 新增 summary 兼容逻辑，旧会话会自动补充空 summary。
+- 新增 summary 读取和保存接口：
+  - `GET /conversations/{conversation_id}/summary`
+  - `PUT /conversations/{conversation_id}/summary`
+- 新增 `app/memory/summary_manager.py`。
+- 支持根据 `summary.source_message_count` 找出未摘要的新消息。
+- 支持构造 Summary Memory Prompt。
+- 新增自动刷新摘要接口：
+  - `POST /conversations/{conversation_id}/summary/refresh`
+- `/chat/memory` 支持把 Summary Memory 注入上下文。
+- `context_stats` 新增 `summary_used` 字段。
+- 新增 Summary Memory 相关单元测试。
+
+### 修改内容
+
+- `ConversationDetailResponse` 新增 `summary` 字段。
+- `MemoryChatResponse.context_stats` 新增 `summary_used`。
+- 更新 `scripts/check_project.py`，纳入 summary manager 和相关测试。
+- 测试数量增加到 49 passed。
+
+### 说明
+
+- 当前 Summary Memory 支持手动更新和接口自动刷新。
+- 当前自动摘要仍然是基础版，没有接入后台定时任务。
+- 当前还没有实现向量记忆、RAG 和长期数据库存储。
+- 本版本为后续长期记忆、上下文压缩和 Agentic RAG 奠定基础。
+
 ## v0.3.0 - 上下文管理基础版本
 
 ### 新增功能

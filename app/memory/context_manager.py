@@ -194,6 +194,7 @@ def trim_messages_by_token_budget(
 def build_context_window(
     raw_messages: list[dict[str, Any]],
     system_message: str | None = None,
+    summary_message: str | None = None,
     max_history_messages: int = DEFAULT_MAX_HISTORY_MESSAGES,
     max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
     reserved_output_tokens: int = DEFAULT_RESERVED_OUTPUT_TOKENS,
@@ -214,6 +215,15 @@ def build_context_window(
         messages.append({
             "role": "system",
             "content": system_message,
+        })
+
+    if summary_message and summary_message.strip():
+        messages.append({
+            "role": "system",
+            "content": (
+                "以下是较早对话历史的摘要，用于帮助你理解长期上下文：\n"
+                f"{summary_message.strip()}"
+            ),
         })
 
     normalized_history = normalize_messages(raw_messages)
@@ -242,4 +252,5 @@ def build_context_window(
         "estimated_input_tokens": estimate_messages_tokens(final_messages),
         "max_context_tokens": max_context_tokens,
         "reserved_output_tokens": reserved_output_tokens,
+        "summary_used": bool(summary_message and summary_message.strip()),
     }

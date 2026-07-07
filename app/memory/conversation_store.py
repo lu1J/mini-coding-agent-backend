@@ -77,6 +77,11 @@ def create_conversation(
         "created_at": now,
         "updated_at": now,
         "metadata": metadata or {},
+        "summary": {
+            "content": "",
+            "updated_at": None,
+            "source_message_count": 0,
+        },
         "messages": [],
     }
 
@@ -106,7 +111,11 @@ def read_conversation(conversation_id: str) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"会话不存在：{conversation_id}")
 
-    return json.loads(path.read_text(encoding="utf-8"))
+    conversation = json.loads(path.read_text(encoding="utf-8"))
+
+    ensure_conversation_summary(conversation)
+
+    return conversation
 
 
 def append_message(
@@ -226,3 +235,65 @@ def build_messages_for_llm(
             })
 
     return messages
+
+
+def ensure_conversation_summary(conversation: dict[str, Any]) -> dict[str, Any]:
+    """
+    确保旧会话也具备 summary 字段。
+
+    这样 v0.2.0 / v0.3.0 创建的旧会话文件，
+    在 v0.4.0 中也能兼容。
+    """
+    summary = conversation.get("summary")
+
+    if not isinstance(summary, dict):
+        summary = {
+            "content": "",
+            "updated_at": None,
+            "source_message_count": 0,
+        }
+        conversation["summary"] = summary
+
+    summary.setdefault("content", "")
+    summary.setdefault("updated_at", None)
+    summary.setdefault("source_message_count", 0)
+
+    return summary
+
+
+def get_conversation_summary(conversation_id: str) -> dict[str, Any]:
+    """
+    获取某个会话的摘要记忆。
+    """
+    conversation = read_conversation(conversation_id)
+    summary = ensure_conversation_summary(conversation)
+
+    return summary
+
+
+def save_conversation_summary(
+    conversation_id: str,
+    content: str,
+    source_message_count: int | None = None,
+) -> dict[str, Any]:
+    """
+    保存某个会话的摘要记忆。
+    """
+    conversation = read_conversation(conversation_id)
+
+    summary = {
+        "content": content.strip(),
+        "updated_at": utc_now_iso(),
+        "source_message_count": (
+            source_message_count
+            if source_message_count is not None
+            else len(conversation.get("messages", []))
+        ),
+    }
+
+    conversation["summary"] = summary
+    conversation["updated_at"] = utc_now_iso()
+
+    save_conversation(conversation)
+
+    return summary
