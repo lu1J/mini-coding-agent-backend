@@ -12,6 +12,7 @@ from app.agent.approval_store import read_pending_action, delete_pending_action
 from app.tools.file_tools import AVAILABLE_FILE_TOOLS
 from app.agent.agent_stream import run_code_agent_stream
 from openai import APIConnectionError, APIError, APIStatusError
+from app.memory.context_manager import build_context_window
 
 from app.memory.conversation_store import (
     create_conversation as store_create_conversation,
@@ -19,7 +20,6 @@ from app.memory.conversation_store import (
     read_conversation as store_read_conversation,
     append_message as store_append_message,
     create_or_read_conversation as store_create_or_read_conversation,
-    build_messages_for_llm as store_build_messages_for_llm,
 )
 
 from app.schemas import (
@@ -197,11 +197,17 @@ def chat_with_memory(request: MemoryChatRequest):
             metadata=request.metadata,
         )
 
-        messages = store_build_messages_for_llm(
-            conversation_id=conversation_id,
+        current_conversation = store_read_conversation(conversation_id)
+
+        context = build_context_window(
+            raw_messages=current_conversation.get("messages", []),
             system_message=MEMORY_CHAT_SYSTEM_PROMPT,
-            max_messages=request.max_history_messages,
+            max_history_messages=request.max_history_messages,
+            max_context_tokens=request.max_context_tokens,
+            reserved_output_tokens=request.max_tokens,
         )
+
+        messages = context["messages"]
 
         answer = llm.chat(
             messages=messages,
@@ -224,6 +230,14 @@ def chat_with_memory(request: MemoryChatRequest):
             "title": updated_conversation["title"],
             "answer": answer,
             "message_count": len(updated_conversation.get("messages", [])),
+            "context_stats": {
+                "total_messages": context["total_messages"],
+                "used_messages": context["used_messages"],
+                "dropped_messages": context["dropped_messages"],
+                "estimated_input_tokens": context["estimated_input_tokens"],
+                "max_context_tokens": context["max_context_tokens"],
+                "reserved_output_tokens": context["reserved_output_tokens"],
+            },
         }
 
 

@@ -16,6 +16,34 @@ MAJOR.MINOR.PATCH
 
 ### 版本定位
 
+## v0.3.0 - 上下文管理基础版本
+
+### 新增功能
+
+- 新增 `app/memory/context_manager.py`。
+- 新增上下文窗口构建能力。
+- 支持对历史消息进行规范化处理。
+- 支持按消息数量裁剪历史记录。
+- 支持按 token 预算裁剪上下文。
+- 新增粗略 token 估算逻辑。
+- `/chat/memory` 接入 Context Manager。
+- `/chat/memory` 返回 `context_stats`，用于观察上下文使用情况。
+- 新增 `tests/test_context_manager.py` 单元测试。
+
+### 修改内容
+
+- `MemoryChatRequest` 新增 `max_context_tokens` 参数。
+- `MemoryChatResponse` 新增 `context_stats` 字段。
+- 更新 `scripts/check_project.py`，纳入 context manager 文件和测试。
+- 测试数量从 33 个增加到 38 个。
+
+### 说明
+
+- 当前 token 估算是粗略估算，不等于真实 tokenizer 计算结果。
+- 当前策略是先按消息数量裁剪，再按 token 预算裁剪。
+- 本版本为后续 Summary Memory、长期记忆和 RAG 提供上下文管理基础。
+
+
 ## v0.2.0 - 会话记忆基础版本
 
 ### 新增功能

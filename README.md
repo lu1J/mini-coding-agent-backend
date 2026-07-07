@@ -1,14 +1,30 @@
 # Mini Coding Agent Backend
 
-一个基于 FastAPI、DeepSeek 大模型和 Tool Calling 的代码智能体后端项目。
+一个基于 **FastAPI、DeepSeek API、Tool Calling 和原生 Agent Loop** 实现的代码智能体后端项目。
 
-本项目实现了一个简化版 Coding Agent。用户可以通过接口向 Agent 提交代码相关任务，例如读取文件、搜索代码、查看指定行、创建文件、修改文件、运行语法检查、查看 Git 状态和 Git diff。系统支持工具调用、执行轨迹记录、人工确认机制、风险分级、流式执行、单元测试和 Agent 任务评估。
+本项目不是普通聊天机器人，而是一个面向代码任务的后端 Agent 系统。用户可以通过接口向 Agent 提交代码相关任务，例如读取文件、搜索代码、查看指定行、创建文件、修改文件、运行语法检查、查看 Git 状态和 Git diff。系统支持工具调用、执行轨迹记录、人工确认机制、风险分级、流式执行、会话记忆、上下文管理、单元测试和 Agent 任务评估。
 
 ---
 
-## 1. 项目简介
+## 1. 当前版本
 
-Mini Coding Agent Backend 是一个面向代码任务的后端智能体系统，核心目标是模拟真实 Coding Agent 的基础工作流程：
+```text
+v0.3.0
+```
+
+当前版本为：
+
+```text
+上下文管理基础版本
+```
+
+在 v0.2.0 会话记忆能力的基础上，v0.3.0 新增了 Context Manager，用于控制发送给大模型的历史消息数量和上下文 token 预算。
+
+---
+
+## 2. 项目目标
+
+Mini Coding Agent Backend 的核心目标是模拟真实 Coding Agent 的基础工作流程：
 
 ```text
 用户提出代码任务
@@ -17,22 +33,34 @@ Mini Coding Agent Backend 是一个面向代码任务的后端智能体系统，
 ↓
 模型选择合适工具
 ↓
-后端执行工具
+后端校验并执行工具
 ↓
 工具结果返回给模型
 ↓
 模型继续推理或生成最终回答
 ```
-## 当前版本
+
+对于带记忆的聊天场景，流程是：
 
 ```text
-v0.2.0
+用户发送消息
+↓
+后端创建或读取 conversation_id
+↓
+保存 user message
+↓
+Context Manager 构建上下文窗口
+↓
+调用大模型
+↓
+保存 assistant message
+↓
+返回 answer + context_stats
 ```
-本项目不是普通聊天机器人，而是一个具备代码工具调用能力的 Agent 后端系统。
 
 ---
 
-## 2. 技术栈
+## 3. 技术栈
 
 ```text
 后端框架：FastAPI
@@ -40,17 +68,18 @@ v0.2.0
 Agent 架构：原生 Agent Loop + Tool Calling
 数据校验：Pydantic
 流式输出：Server-Sent Events
+会话存储：本地 JSON
+上下文管理：Context Manager
 测试框架：pytest
 评估方式：自定义 Agent Eval
 工程脚本：Python scripts
 部署准备：Dockerfile / .dockerignore
-版本管理：Git
+版本管理：Git / GitHub Release
 ```
+
 ---
 
-## 项目文档
-
-本项目提供了较完整的工程文档，方便理解接口、架构、安全机制和评估方式。
+## 4. 项目文档
 
 | 文档 | 说明 |
 |---|---|
@@ -59,12 +88,12 @@ Agent 架构：原生 Agent Loop + Tool Calling
 | [安全机制](docs/SECURITY.md) | 说明 workspace 沙盒、路径限制、敏感文件保护、命令白名单和高风险审批机制 |
 | [评估说明](docs/EVALUATION.md) | 说明 Agent Eval 的任务设计、评估指标、当前结果和后续升级方向 |
 | [路线图](docs/ROADMAP.md) | 说明当前版本完成度、后续迭代计划和长期演进方向 |
+
 ---
 
+## 5. 核心功能
 
-## 3. 核心功能
-
-### 3.1 CodeAgent 代码智能体
+### 5.1 CodeAgent 代码智能体
 
 核心接口：
 
@@ -89,7 +118,7 @@ CodeAgent 支持：
 
 ---
 
-### 3.2 SSE 流式执行接口
+### 5.2 SSE 流式执行接口
 
 流式接口：
 
@@ -116,7 +145,67 @@ max_steps_reached
 
 ---
 
-### 3.3 人工确认机制
+### 5.3 会话记忆能力
+
+从 v0.2.0 开始，项目支持基础会话记忆。
+
+核心接口：
+
+```text
+POST /chat/memory
+```
+
+支持能力：
+
+- 不传 `conversation_id` 时自动创建新会话
+- 传入 `conversation_id` 时继续已有会话
+- 自动保存用户消息
+- 自动保存助手回复
+- 支持本地 JSON 会话持久化
+- 支持查看会话列表和会话详情
+
+会话数据保存在：
+
+```text
+workspace/.conversations/
+```
+
+该目录属于运行时数据，不会提交到 Git。
+
+---
+
+### 5.4 Context Manager 上下文管理
+
+从 v0.3.0 开始，`/chat/memory` 接入 Context Manager。
+
+Context Manager 负责：
+
+- 规范化历史消息
+- 按消息数量裁剪历史记录
+- 粗略估算输入 token 数量
+- 按 token 预算裁剪上下文
+- 返回上下文使用统计信息
+
+`/chat/memory` 响应中会返回：
+
+```json
+{
+  "context_stats": {
+    "total_messages": 4,
+    "used_messages": 4,
+    "dropped_messages": 0,
+    "estimated_input_tokens": 123,
+    "max_context_tokens": 6000,
+    "reserved_output_tokens": 800
+  }
+}
+```
+
+这让系统从“简单保存历史”升级为“有上下文预算意识的多轮会话”。
+
+---
+
+### 5.5 人工确认机制
 
 对于高风险工具，例如：
 
@@ -161,44 +250,79 @@ POST /agent/approvals/{approval_id}/execute
 }
 ```
 
-- 会话记忆基础能力：支持 `conversation_id`、本地 JSON 会话持久化、会话管理接口以及 `/chat/memory` 多轮记忆聊天接口。
+---
+
+## 6. 主要接口
+
+### 6.1 基础接口
+
+| 接口 | 说明 |
+|---|---|
+| `GET /health` | 健康检查 |
+| `POST /chat` | 普通单轮聊天 |
+| `POST /chat/history` | 带请求内历史的聊天 |
+| `POST /chat/stream` | 普通流式聊天 |
 
 ---
 
-## 4. 工具系统
+### 6.2 CodeAgent 接口
 
-### 4.1 只读工具
-
-| 工具名 | 作用 |
+| 接口 | 说明 |
 |---|---|
-| list_files | 查看 workspace 中的文件和目录 |
-| read_file | 读取小文件全文 |
-| read_file_lines | 读取指定行范围 |
-| search_code | 搜索代码关键词 |
-| get_file_diff | 查看单个文件与 .bak 的差异 |
-| get_workspace_diff | 查看 workspace 中的 .bak diff |
-| get_git_status | 查看 Git 工作区状态 |
-| get_git_diff | 查看 Git diff |
+| `POST /agent/code` | 执行代码智能体任务 |
+| `POST /agent/code/stream` | 流式执行代码智能体任务 |
+| `GET /agent/runs` | 查看 Agent 运行历史 |
+| `GET /agent/runs/{run_id}` | 查看单次运行详情 |
+| `POST /agent/approvals/{approval_id}/execute` | 执行或拒绝高风险操作审批 |
 
 ---
 
-### 4.2 写入工具
+### 6.3 会话记忆接口
 
-| 工具名 | 作用 |
+| 接口 | 说明 |
 |---|---|
-| edit_file | 精确替换已有文件内容 |
-| write_new_file | 创建新文件 |
-| ensure_gitignore | 创建或更新 .gitignore |
+| `POST /conversations` | 创建新会话 |
+| `GET /conversations` | 查看最近会话列表 |
+| `GET /conversations/{conversation_id}` | 查看某个会话详情 |
+| `POST /conversations/{conversation_id}/messages` | 向指定会话追加消息 |
+| `POST /chat/memory` | 带本地会话记忆的聊天接口 |
+
+---
+
+## 7. 工具系统
+
+### 7.1 只读工具
+
+| 工具名 | 作用 | 风险等级 |
+|---|---|---|
+| `list_files` | 查看 workspace 中的文件和目录 | low |
+| `read_file` | 读取小文件全文 | low |
+| `read_file_lines` | 读取指定行范围 | low |
+| `search_code` | 搜索代码关键词 | low |
+| `get_file_diff` | 查看单个文件与 `.bak` 的差异 | low |
+| `get_workspace_diff` | 查看 workspace 中的 `.bak diff` | low |
+| `get_git_status` | 查看 Git 工作区状态 | low |
+| `get_git_diff` | 查看 Git diff | low |
+
+---
+
+### 7.2 写入工具
+
+| 工具名 | 作用 | 风险等级 |
+|---|---|---|
+| `edit_file` | 精确替换已有文件内容 | high |
+| `write_new_file` | 创建新文件 | high |
+| `ensure_gitignore` | 创建或更新 `.gitignore` | high |
 
 写入工具属于高风险工具，必须经过用户确认后才会执行。
 
 ---
 
-### 4.3 命令工具
+### 7.3 命令工具
 
-| 工具名 | 作用 |
-|---|---|
-| run_command | 执行安全白名单命令 |
+| 工具名 | 作用 | 风险等级 |
+|---|---|---|
+| `run_command` | 执行安全白名单命令 | medium |
 
 当前允许执行的命令包括：
 
@@ -213,23 +337,16 @@ pytest
 
 ---
 
-## 5. 工具风险分级
+## 8. 工具风险分级
 
-项目将工具分为三类风险等级：
+项目将工具分为四类风险等级：
 
 | 风险等级 | 工具类型 | 是否需要审批 |
 |---|---|---|
 | low | 只读工具 | 否 |
 | medium | 命令执行工具 | 暂不审批，但必须白名单限制 |
 | high | 写入工具 | 是 |
-
-示例：
-
-```text
-read_file_lines → low
-run_command → medium
-write_new_file → high
-```
+| unknown | 未登记工具 | 默认谨慎处理 |
 
 风险分级统一由以下文件管理：
 
@@ -239,7 +356,7 @@ app/agent/tool_policy.py
 
 ---
 
-## 6. Approval Resume
+## 9. Approval Resume
 
 项目支持 Approval Resume v1。
 
@@ -285,7 +402,7 @@ resume_result
 
 ---
 
-## 7. Agent Trace 日志
+## 10. Agent Trace 日志
 
 每次 Agent 执行都会保存运行日志。
 
@@ -327,23 +444,7 @@ duration_ms
 
 ---
 
-## 8. 历史记录接口
-
-### 查看历史运行列表
-
-```text
-GET /agent/runs
-```
-
-### 查看单次运行详情
-
-```text
-GET /agent/runs/{run_id}
-```
-
----
-
-## 9. 项目结构
+## 11. 项目结构
 
 ```text
 mini-agent-backend/
@@ -353,6 +454,10 @@ mini-agent-backend/
 │   ├── llm/
 │   │   ├── __init__.py
 │   │   └── deepseek_client.py
+│   ├── memory/
+│   │   ├── __init__.py
+│   │   ├── conversation_store.py
+│   │   └── context_manager.py
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── time_tools.py
@@ -370,74 +475,54 @@ mini-agent-backend/
 │       ├── tool_policy.py
 │       └── tool_runner.py
 ├── tests/
+│   ├── test_approval_store.py
+│   ├── test_context_manager.py
+│   ├── test_conversation_store.py
 │   ├── test_file_tools.py
 │   ├── test_git_tools.py
-│   ├── test_approval_store.py
+│   ├── test_memory_chat_api.py
 │   └── test_run_logger.py
 ├── workspace/
 │   ├── .agent_runs/
 │   ├── .agent_pending/
+│   ├── .conversations/
 │   └── demo_project/
+├── docs/
+│   ├── API.md
+│   ├── ARCHITECTURE.md
+│   ├── SECURITY.md
+│   ├── EVALUATION.md
+│   └── ROADMAP.md
+├── scripts/
+│   ├── check_project.py
+│   ├── check_release.py
+│   ├── dev.py
+│   └── setup_demo_workspace.py
 ├── eval_tasks.json
-├── eval_result.json
 ├── run_eval.py
 ├── main.py
 ├── requirements.txt
 ├── pytest.ini
-├── .env
+├── VERSION
+├── CHANGELOG.md
+├── Dockerfile
+├── .dockerignore
+├── .env.example
 ├── .gitignore
 └── README.md
 ```
----
-
-## 项目核心亮点
-
-本项目不是简单的 LLM 聊天机器人，而是一个后端优先的 Coding Agent 原型系统。
-
-核心亮点包括：
-
-```text
-1. 原生手写 Agent Loop
-   不直接套壳 LangChain，通过自定义循环实现模型调用、工具调用、工具结果回填和多步推理。
-
-2. Tool Calling 工具闭环
-   模型只负责规划工具调用，后端负责校验和执行工具，避免模型直接操作系统。
-
-3. 受控 Workspace 沙盒
-   所有文件读取、搜索、修改和命令执行都限制在 workspace 目录内，防止越权访问项目外文件。
-
-4. 高风险操作审批机制
-   edit_file、write_new_file、ensure_gitignore 等会修改文件的工具必须经过用户审批后才能执行。
-
-5. 工具风险等级设计
-   将工具划分为 low、medium、high、unknown，方便后续扩展权限控制和前端审批页面。
-
-6. Git 工具隔离
-   get_git_status 和 get_git_diff 只允许作用于独立 Git 仓库根目录，避免 workspace 普通目录误读主项目 Git 状态。
-
-7. SSE 流式执行过程
-   支持实时输出 Agent 执行事件，包括模型调用、工具调用、审批等待、最终回答等过程。
-
-8. 运行日志记录
-   每次 Agent 执行都会保存 run_id、steps、tool_result、status、error 等信息，方便调试和历史追踪。
-
-9. Agent Eval 评估
-   使用固定任务集评估 Agent 是否能稳定完成文件读取、代码搜索、Git 状态查看、命令执行和审批触发等任务。
-
-10. 工程化交付
-    提供 pytest、项目自检脚本、统一开发命令、Demo Workspace 初始化脚本、Dockerfile 和 .dockerignore。
 
 ---
 
-## 快速启动
+## 12. 快速启动
 
-### 1. 创建虚拟环境
+### 12.1 创建虚拟环境
 
 ```bash
 python -m venv .venv
 ```
 
-### 2. 激活虚拟环境
+### 12.2 激活虚拟环境
 
 Windows PowerShell：
 
@@ -445,13 +530,13 @@ Windows PowerShell：
 .venv\Scripts\Activate.ps1
 ```
 
-### 3. 安装依赖
+### 12.3 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. 配置环境变量
+### 12.4 配置环境变量
 
 项目提供了环境变量模板：
 
@@ -470,7 +555,7 @@ copy .env.example .env
 ```env
 DEEPSEEK_API_KEY=your_real_deepseek_api_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
 注意：
@@ -480,7 +565,9 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 .env.example 是配置模板，可以提交到 Git。
 ```
 
-### 5. 初始化 Demo 工作区
+---
+
+### 12.5 初始化 Demo 工作区
 
 本项目的 CodeAgent 会在 `workspace/demo_project` 中执行代码读取、搜索、Git status、Git diff 和语法检查等演示任务。
 
@@ -506,15 +593,17 @@ python scripts/dev.py setup-demo
 准备 Agent Eval 所需文件
 ```
 
-### 6. 启动后端服务
+---
 
-方式一：直接启动
+### 12.6 启动后端服务
+
+方式一：直接启动：
 
 ```bash
 uvicorn main:app --reload
 ```
 
-方式二：使用统一开发命令
+方式二：使用统一开发命令：
 
 ```powershell
 python scripts/dev.py serve
@@ -526,7 +615,9 @@ python scripts/dev.py serve
 http://127.0.0.1:8000/docs
 ```
 
-### 7. 健康检查
+---
+
+### 12.7 健康检查
 
 服务启动后，另开一个终端运行：
 
@@ -541,27 +632,247 @@ HTTP 状态码：200
 服务运行正常
 ```
 
-### 8. 运行单元测试
+---
+
+## 13. 常用开发命令
+
+项目提供统一开发命令入口：
+
+```text
+scripts/dev.py
+```
+
+常用命令如下：
+
+```powershell
+python scripts/dev.py serve          # 启动 FastAPI 服务
+python scripts/dev.py health         # 检查服务健康状态
+python scripts/dev.py test           # 运行 pytest 单元测试
+python scripts/dev.py eval           # 运行 Agent Eval
+python scripts/dev.py check          # 运行项目自检
+python scripts/dev.py setup-demo     # 初始化 demo_project 工作区
+python scripts/dev.py release-check  # 发布前安全检查
+```
+
+---
+
+## 14. 接口测试示例
+
+### 14.1 CodeAgent 普通执行
+
+```text
+POST /agent/code
+```
+
+请求体：
+
+```json
+{
+  "message": "请读取 demo_project/math_utils.py 第 1 到 20 行，并解释代码作用。",
+  "max_steps": 5
+}
+```
+
+---
+
+### 14.2 CodeAgent 流式执行
+
+```text
+POST /agent/code/stream
+```
+
+PowerShell 测试示例：
+
+```powershell
+curl.exe -N -X POST "http://127.0.0.1:8000/agent/code/stream" -H "Content-Type: application/json" --data-binary "@body_stream.json"
+```
+
+---
+
+### 14.3 创建会话
+
+```text
+POST /conversations
+```
+
+请求体：
+
+```json
+{
+  "title": "Day 08 Memory Test",
+  "metadata": {
+    "source": "manual_test"
+  }
+}
+```
+
+---
+
+### 14.4 带记忆聊天
+
+```text
+POST /chat/memory
+```
+
+请求体：
+
+```json
+{
+  "message": "我正在做 Mini Coding Agent 项目，请记住我在做上下文管理功能。",
+  "title": "Context Manager Test",
+  "max_tokens": 800,
+  "max_history_messages": 20,
+  "max_context_tokens": 6000,
+  "metadata": {
+    "source": "manual_test"
+  }
+}
+```
+
+第二轮继续同一个会话：
+
+```json
+{
+  "conversation_id": "conv_xxxxxxxx_xxxxxx_xxxxxxxx",
+  "message": "我刚才说我在做什么功能？"
+}
+```
+
+---
+
+### 14.5 审批执行
+
+```text
+POST /agent/approvals/{approval_id}/execute
+```
+
+请求体：
+
+```json
+{
+  "approved": true
+}
+```
+
+---
+
+## 15. 安全机制
+
+本项目实现了多层安全限制。
+
+### 15.1 workspace 限制
+
+所有文件工具只能访问：
+
+```text
+workspace/
+```
+
+禁止访问项目外路径。
+
+例如以下路径会被拒绝：
+
+```text
+../outside.txt
+C:\Users\...
+```
+
+---
+
+### 15.2 禁止读取 .env
+
+文件读取工具禁止读取 `.env` 文件，防止 API Key 泄露。
+
+---
+
+### 15.3 写操作审批
+
+以下工具必须经过用户确认：
+
+```text
+edit_file
+write_new_file
+ensure_gitignore
+```
+
+---
+
+### 15.4 命令白名单
+
+`run_command` 只允许执行有限安全命令。
+
+危险命令会返回：
+
+```text
+command_not_allowed
+```
+
+---
+
+### 15.5 工具错误结构化
+
+工具失败时会返回结构化错误，例如：
+
+```json
+{
+  "type": "command_failed",
+  "message": "命令执行失败，退出码不为 0。",
+  "detail": "..."
+}
+```
+
+---
+
+## 16. 单元测试
+
+项目使用 pytest 进行测试。
+
+运行全部测试：
+
+```bash
+python -m pytest tests/
+```
+
+或者：
 
 ```powershell
 python scripts/dev.py test
 ```
 
-等价于：
-
-```powershell
-python -m pytest tests/
-```
-
 当前测试结果：
 
 ```text
-23 passed
+38 passed
 ```
 
-### 9. 运行 Agent Eval
+已覆盖：
 
-先确保后端服务正在运行，然后执行：
+- 文件工具
+- Git 工具
+- 审批存储
+- 运行日志
+- 会话存储
+- 记忆聊天接口
+- 上下文管理模块
+
+---
+
+## 17. Agent 评估集
+
+项目提供 Agent 任务评估脚本：
+
+```text
+eval_tasks.json
+run_eval.py
+```
+
+运行评估：
+
+```bash
+python run_eval.py
+```
+
+或：
 
 ```powershell
 python scripts/dev.py eval
@@ -574,9 +885,22 @@ python scripts/dev.py eval
 通过：10
 失败：0
 成功率：100.0%
+平均工具调用数：约 1.60
 ```
 
-### 10. 运行项目自检
+评估结果会保存到：
+
+```text
+eval_result.json
+```
+
+该文件属于运行时结果，不提交到 Git。
+
+---
+
+## 18. 项目自检
+
+运行：
 
 ```powershell
 python scripts/dev.py check
@@ -601,30 +925,7 @@ pytest 单元测试是否通过
 
 ---
 
-## 统一开发命令
-
-项目提供统一开发命令入口：
-
-```text
-scripts/dev.py
-```
-
-常用命令如下：
-
-```powershell
-python scripts/dev.py serve       # 启动 FastAPI 服务
-python scripts/dev.py health      # 检查服务健康状态
-python scripts/dev.py test        # 运行 pytest 单元测试
-python scripts/dev.py eval        # 运行 Agent Eval
-python scripts/dev.py check       # 运行项目自检
-python scripts/dev.py setup-demo  # 初始化 demo_project 工作区
-```
-
-这样做可以减少手动记忆命令的成本，也方便项目演示和后续接入 CI/CD。
-
----
-
-## Demo Workspace 说明
+## 19. Demo Workspace 说明
 
 `workspace/demo_project` 是 CodeAgent 的演示工作区。
 
@@ -655,209 +956,54 @@ demo_project 是可再生的演示环境
 避免把运行时数据和嵌套 Git 仓库提交到主项目
 ```
 
-这保证了项目环境可复现，也避免污染主项目 Git 仓库。
-
 ---
 
-## 11. 常用接口示例
-
-### 11.1 CodeAgent 普通执行
+## 20. 项目核心亮点
 
 ```text
-POST /agent/code
-```
+1. 原生手写 Agent Loop
+   不直接套壳 LangChain，通过自定义循环实现模型调用、工具调用、工具结果回填和多步推理。
 
-请求体：
+2. Tool Calling 工具闭环
+   模型只负责规划工具调用，后端负责校验和执行工具，避免模型直接操作系统。
 
-```json
-{
-  "message": "请读取 demo_project/math_utils.py 第 1 到 20 行，并解释代码作用。",
-  "max_steps": 5
-}
-```
+3. 受控 Workspace 沙盒
+   所有文件读取、搜索、修改和命令执行都限制在 workspace 目录内，防止越权访问项目外文件。
 
----
+4. 高风险操作审批机制
+   edit_file、write_new_file、ensure_gitignore 等会修改文件的工具必须经过用户审批后才能执行。
 
-### 11.2 CodeAgent 流式执行
+5. 工具风险等级设计
+   将工具划分为 low、medium、high、unknown，方便后续扩展权限控制和前端审批页面。
 
-```text
-POST /agent/code/stream
-```
+6. Approval Resume
+   用户批准高风险操作后，Agent 可以继续执行后续检查和总结。
 
-PowerShell 测试示例：
+7. Git 工具隔离
+   get_git_status 和 get_git_diff 只允许作用于独立 Git 仓库根目录，避免 workspace 普通目录误读主项目 Git 状态。
 
-```powershell
-curl.exe -N -X POST "http://127.0.0.1:8000/agent/code/stream" -H "Content-Type: application/json" --data-binary "@body_stream.json"
-```
+8. SSE 流式执行过程
+   支持实时输出 Agent 执行事件，包括模型调用、工具调用、审批等待、最终回答等过程。
 
----
+9. 运行日志记录
+   每次 Agent 执行都会保存 run_id、steps、tool_result、status、error 等信息，方便调试和历史追踪。
 
-### 11.3 审批执行
+10. 会话记忆能力
+    支持 conversation_id、本地 JSON 会话持久化、多轮记忆聊天和历史消息管理。
 
-```text
-POST /agent/approvals/{approval_id}/execute
-```
+11. 上下文管理能力
+    支持历史消息裁剪、token 预算控制和 context_stats 统计返回。
 
-请求体：
+12. Agent Eval 评估
+    使用固定任务集评估 Agent 是否能稳定完成文件读取、代码搜索、Git 状态查看、命令执行和审批触发等任务。
 
-```json
-{
-  "approved": true
-}
-```
-
----
-
-## 12. 安全机制
-
-本项目实现了多层安全限制。
-
-### 12.1 workspace 限制
-
-所有文件工具只能访问：
-
-```text
-workspace/
-```
-
-禁止访问项目外路径。
-
-例如以下路径会被拒绝：
-
-```text
-../outside.txt
-C:\Users\...
+13. 工程化交付
+    提供 pytest、项目自检脚本、统一开发命令、Demo Workspace 初始化脚本、Dockerfile 和 .dockerignore。
 ```
 
 ---
 
-### 12.2 禁止读取 .env
-
-文件读取工具禁止读取 `.env` 文件，防止 API Key 泄露。
-
----
-
-### 12.3 写操作审批
-
-以下工具必须经过用户确认：
-
-```text
-edit_file
-write_new_file
-ensure_gitignore
-```
-
----
-
-### 12.4 命令白名单
-
-`run_command` 只允许执行有限安全命令。
-
-危险命令会返回：
-
-```text
-command_not_allowed
-```
-
----
-
-### 12.5 工具错误结构化
-
-工具失败时会返回结构化错误，例如：
-
-```json
-{
-  "type": "command_failed",
-  "message": "命令执行失败，退出码不为 0。",
-  "detail": "..."
-}
-```
-
----
-
-## 13. 单元测试
-
-项目使用 pytest 进行测试。
-
-运行全部测试：
-
-```bash
-python -m pytest tests/
-```
-
-当前测试结果：
-
-```text
-23 passed
-```
-
-已覆盖：
-
-- 文件工具
-- Git 工具
-- 审批存储
-- 运行日志
-
----
-
-## 14. Agent 评估集
-
-项目提供 Agent 任务评估脚本：
-
-```text
-eval_tasks.json
-run_eval.py
-```
-
-运行评估：
-
-```bash
-python run_eval.py
-```
-
-当前评估结果：
-
-```text
-总任务数：10
-通过：10
-失败：0
-成功率：100.0%
-平均耗时：7013 ms
-平均工具调用数：1.60
-```
-
-评估结果会保存到：
-
-```text
-eval_result.json
-```
-
----
-
-## 15. 当前项目亮点
-
-- 基于 FastAPI 构建 Agent 后端服务
-- 接入 DeepSeek 大模型 Tool Calling 能力
-- 实现 Agent Loop 多步工具调用
-- 实现安全文件工具系统
-- 支持 read_file_lines 局部代码读取
-- 支持 Git status / Git diff 审查
-- 支持写操作 Human-in-the-loop 审批
-- 支持 Approval Resume v1
-- 支持 Agent Trace 日志持久化
-- 支持 SSE 流式执行过程输出
-- 支持工具风险分级
-- 支持结构化错误处理
-- 支持 pytest 单元测试
-- 支持 Agent Eval 任务评估集
-
----
-
-## 16. 当前进度
-
-当前已完成：
-
-## 当前完成度
+## 21. 当前完成度
 
 当前版本已经完成：
 
@@ -874,6 +1020,7 @@ CodeAgent SSE 流式接口
 安全命令执行工具
 Git status / Git diff 工具
 高风险操作审批
+审批后继续执行
 工具风险等级
 运行日志记录
 Agent Eval
@@ -881,15 +1028,120 @@ pytest 单元测试
 统一开发命令
 Demo Workspace 初始化
 Docker 部署准备
+会话记忆基础能力
+上下文管理基础能力
 ```
 
 ---
 
-## 17. 后续计划
+## 22. 当前限制
 
-会话持久化记忆
-上下文压缩
-Self-Reflection 失败自省循环
-代码结构索引
-极简前端演示页面
-LangGraph 状态机版本
+当前项目仍然是学习和原型阶段，主要限制包括：
+
+```text
+1. 会话存储仍然使用本地 JSON，不适合生产环境高并发场景。
+2. Context Manager 使用粗略 token 估算，不等同于真实 tokenizer。
+3. Summary Memory 尚未完成。
+4. 长期记忆、向量记忆和 RAG 尚未接入。
+5. 还没有前端页面，主要通过 Swagger、curl、PowerShell 或 Python requests 测试。
+6. 尚未接入 LangGraph 状态机。
+7. 尚未接入 LangSmith / OpenTelemetry 等可观测性平台。
+```
+
+---
+
+## 23. 后续计划
+
+后续迭代方向：
+
+```text
+v0.4.0：Summary Memory 摘要记忆基础版
+v0.5.0：Self-Reflection 失败自省循环
+v0.6.0：代码结构索引与更强代码检索
+v0.7.0：极简前端演示页面
+v0.8.0：LangGraph 状态机版本
+v0.9.0：评估体系升级
+v1.0.0：完整 Mini Coding Agent Demo 版本
+```
+
+---
+
+## 24. 常见问题
+
+### 24.1 为什么 DeepSeek 请求失败？
+
+可能原因：
+
+```text
+1. API Key 错误
+2. .env 没有正确加载
+3. 系统代理配置错误
+4. Git 或 Python 请求走了错误的本地代理端口
+5. 网络无法访问 DeepSeek API
+```
+
+可以先测试：
+
+```powershell
+python -c "import requests; print(requests.get('https://api.deepseek.com', timeout=10).status_code)"
+```
+
+如果返回：
+
+```text
+401
+```
+
+说明网络已经连通，只是该测试请求没有携带 API Key。
+
+---
+
+### 24.2 PowerShell 中文显示乱码怎么办？
+
+Windows PowerShell 测试中文 JSON 时可能出现编码问题。可以使用 UTF-8 字节发送请求，或优先使用：
+
+```text
+Swagger UI
+Python requests
+前端页面
+```
+
+也可以用 Python 读取本地 JSON 文件验证真实保存内容。
+
+---
+
+## 25. 版本记录
+
+### v0.3.0
+
+```text
+新增 Context Manager
+支持上下文窗口构建
+支持历史消息裁剪
+支持 token 预算控制
+/chat/memory 返回 context_stats
+测试数量增加到 38 passed
+```
+
+### v0.2.0
+
+```text
+新增 conversation_id
+新增本地 JSON 会话持久化
+新增 /conversations 系列接口
+新增 /chat/memory 多轮记忆聊天接口
+测试数量增加到 33 passed
+```
+
+### v0.1.0
+
+```text
+完成基础 Agent Loop
+完成 Tool Calling
+完成文件工具、Git 工具、命令工具
+完成高风险审批机制
+完成运行日志
+完成 SSE 流式输出
+完成 Agent Eval
+完成基础工程化封版
+```

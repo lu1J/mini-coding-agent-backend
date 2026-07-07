@@ -32,6 +32,7 @@ REQUIRED_FILES = [
     "app/llm/deepseek_client.py",
     "app/memory/__init__.py",
     "app/memory/conversation_store.py",
+    "app/memory/context_manager.py",
     "app/agent/agent_loop.py",
     "app/agent/code_agent.py",
     "app/agent/agent_stream.py",
@@ -45,6 +46,7 @@ REQUIRED_FILES = [
     "tests/test_run_logger.py",
     "tests/test_conversation_store.py",
     "tests/test_memory_chat_api.py",
+    "tests/test_context_manager.py",
 ]
 
 

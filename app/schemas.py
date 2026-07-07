@@ -243,6 +243,7 @@ class MemoryChatRequest(BaseModel):
     title: str | None = Field(default=None, description="新会话标题")
     max_tokens: int = Field(default=800, ge=1, le=4000, description="模型最大输出 token 数")
     max_history_messages: int = Field(default=20, ge=1, le=100, description="最多携带最近多少条历史消息")
+    max_context_tokens: int = Field(default=6000, ge=500, le=200000, description="上下文 token 预算")
     metadata: dict[str, Any] = Field(default_factory=dict, description="用户消息元数据")
 
 
@@ -251,3 +252,4 @@ class MemoryChatResponse(BaseModel):
     title: str = Field(..., description="会话标题")
     answer: str = Field(..., description="模型回复")
     message_count: int = Field(..., description="当前会话消息数量")
+    context_stats: dict[str, Any] = Field(default_factory=dict, description="上下文窗口统计信息")

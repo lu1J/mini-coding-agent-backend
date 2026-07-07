@@ -130,6 +130,10 @@ def test_chat_memory_creates_conversation_and_calls_llm(tmp_path, monkeypatch):
     assert saved["messages"][1]["role"] == "assistant"
     assert saved["messages"][1]["content"] == "fake assistant answer"
 
+    assert data["context_stats"]["total_messages"] >= 2
+    assert data["context_stats"]["used_messages"] >= 2
+    assert data["context_stats"]["estimated_input_tokens"] > 0
+
 
 def test_chat_memory_continues_existing_conversation(tmp_path, monkeypatch):
     """
@@ -178,3 +182,7 @@ def test_chat_memory_continues_existing_conversation(tmp_path, monkeypatch):
     assert len(saved["messages"]) == 4
     assert saved["messages"][0]["content"] == "first user message"
     assert saved["messages"][2]["content"] == "second user message"
+
+    assert second_data["context_stats"]["total_messages"] >= 4
+    assert second_data["context_stats"]["used_messages"] >= 2
+    assert second_data["context_stats"]["estimated_input_tokens"] > 0
