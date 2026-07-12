@@ -580,25 +580,69 @@ Self-Reflection Retry 是 CodeAgent 的失败诊断与恢复模块。
 
 ---
 
-## 15. 后续架构演进方向
+## Task Planner
 
-后续可以继续扩展：
+Task Planner 是 CodeAgent 的执行前任务规划模块。
 
-```text
-1. 会话持久化记忆
-2. 上下文压缩与摘要记忆
-3. Self-Reflection 失败自省循环
-4. 代码结构索引与语义检索
-5. LangGraph 状态机版本
-6. 多 Agent 协作版本
-7. LangSmith 链路观测
-8. SWE-bench Lite 子集评测
-9. Streamlit 极简前端演示
-```
+它位于 Agent Loop 之前，负责根据用户输入生成结构化任务计划。当前实现为规则版，不调用大模型。
 
-当前版本的重点是：
+核心职责：
 
 ```text
-先把原生手写 Agent Loop 做清楚，
-再逐步引入框架、评测和部署能力。
+用户任务
+↓
+识别任务意图
+↓
+提取目标路径
+↓
+推荐工具
+↓
+估计风险等级
+↓
+估计任务复杂度
+↓
+生成执行步骤
+↓
+生成风险提醒
 ```
+
+Task Planner 与其他模块的关系：
+
+Task Planner：
+执行前规划
+
+Agent Loop：
+执行工具调用流程
+
+Reflection：
+工具失败或 max_steps 达到上限后的失败自省
+
+Run Logger：
+保存 task_plan、steps、reflection 和最终结果
+
+当前 /agent/plan 提供独立规划接口，/agent/code 也会在执行前自动生成 task_plan 并保存到运行日志中。
+
+从 v0.6.0 开始，CodeAgent 的主链路升级为：
+
+Plan → Act → Reflect → Answer
+
+---
+
+## 八、更新 docs/ROADMAP.md
+
+如果你有 Roadmap，可以把 Task Planner 标记为完成。
+
+加入或修改：
+
+```markdown
+## 已完成
+
+- v0.4.0：Summary Memory 摘要记忆
+- v0.5.0：Self-Reflection Retry 失败自省与重试提示
+- v0.6.0：Task Planner 任务规划器
+
+## 下一步
+
+- v0.7.0：Project NoteTool 项目笔记
+- v0.8.0：Codebase Retrieval 代码库检索
+- v0.9.0：ContextBuilder 上下文工程升级

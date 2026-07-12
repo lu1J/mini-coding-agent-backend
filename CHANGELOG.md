@@ -16,6 +16,67 @@ MAJOR.MINOR.PATCH
 
 ### 版本定位
 
+## v0.6.0 - Task Planner 任务规划器
+
+### 新增功能
+- 新增 `app/agent/task_planner.py`，实现规则版任务规划器。
+- 支持根据用户任务识别任务意图，包括：
+  - read
+  - search
+  - analyze
+  - edit
+  - test
+  - git
+  - plan
+- 支持从用户任务中提取目标路径，例如：
+  - `demo_project/main.py`
+  - `app/agent/agent_loop.py`
+  - `tests/test_xxx.py`
+- 支持根据任务意图推荐工具，例如：
+  - `read_file`
+  - `search_code`
+  - `edit_file`
+  - `run_command`
+  - `get_workspace_diff`
+  - `get_git_status`
+- 支持估计任务风险等级：
+  - low：只读任务
+  - medium：命令执行任务
+  - high：文件修改任务
+- 支持估计任务复杂度：
+  - simple
+  - medium
+  - complex
+- 支持生成结构化执行计划，包括步骤标题、步骤说明、建议工具、风险等级和规划原因。
+- 新增独立规划接口：
+  - `POST /agent/plan`
+- `/agent/code` 返回结果新增 `task_plan` 字段。
+- Agent run log 新增 `task_plan` 字段，用于保存执行前任务规划结果。
+- Agent step 新增 `model_round` 字段，用于区分模型调用轮次和执行事件编号。
+- 修复一次模型响应包含多个工具调用时 step 编号重复的问题。
+
+### 修改内容
+- `AgentStep` 新增 `model_round` 字段。
+- Agent 响应 schema 新增 `task_plan` 字段。
+- `run_logger.py` 支持保存 `task_plan`。
+- `agent_loop.py` 在执行前生成任务规划。
+- `/agent/code` 返回结果包含执行前计划、执行步骤和失败自省信息。
+- 优化 Task Planner，避免 edit 任务中重复生成读取步骤。
+
+### 新增测试
+- `tests/test_task_planner.py`
+- `tests/test_agent_plan_api.py`
+- `tests/test_agent_code_task_plan.py`
+- `tests/test_run_logger_task_plan.py`
+- `tests/test_agent_loop_step_numbering.py`
+
+### 说明
+- 当前 Task Planner 是规则版，不调用大模型。
+- 当前 Task Planner 只负责规划，不直接执行工具。
+- `/agent/plan` 是独立规划接口。
+- `/agent/code` 会自动生成 `task_plan`，然后进入 Agent Loop 执行。
+- 当前 Agent 主链路升级为：Plan → Act → Reflect → Answer。
+
 ## v0.4.0 - Summary Memory 摘要记忆基础版本
 
 ### 新增功能

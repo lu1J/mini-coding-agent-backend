@@ -647,3 +647,51 @@ max_tokens：摘要生成最大输出 token 数。
   "can_retry": true,
   "next_action_hint": "list_files"
 }
+
+```
+## POST /agent/plan
+
+根据用户任务生成结构化执行计划。
+
+该接口只做任务规划，不执行工具、不修改文件、不调用大模型。
+
+### Request
+
+```json
+{
+  "message": "请修改 demo_project/main.py，把返回内容改成 Hello，并运行测试"
+}
+```
+
+### Response
+```json
+{
+  "objective": "请修改 demo_project/main.py，把返回内容改成 Hello，并运行测试",
+  "intents": ["read", "edit", "test"],
+  "target_paths": ["demo_project/main.py"],
+  "suggested_tools": [
+    "list_files",
+    "read_file",
+    "edit_file",
+    "get_workspace_diff",
+    "run_command"
+  ],
+  "risk_level": "high",
+  "complexity": "complex",
+  "needs_approval": true,
+  "estimated_steps": 5,
+  "steps": [
+    {
+      "index": 1,
+      "title": "读取修改目标",
+      "description": "在修改前读取目标文件，确认当前实现和修改位置。",
+      "suggested_tool": "read_file",
+      "risk_level": "low",
+      "reason": "修改前必须先读取原始内容，避免盲改。"
+    }
+  ],
+  "warnings": [
+    "该任务可能涉及写文件操作，需要用户审批后才能执行高风险工具。"
+  ]
+}
+```

@@ -81,6 +81,7 @@ class AgentStep(BaseModel):
     Agent 执行过程中的单个步骤。
     """
     step: int = Field(..., description="第几轮执行")
+    model_round: int | None = Field(default=None, description="模型调用轮次")
     type: str = Field(..., description="步骤类型，例如 tool_call 或 final_answer")
 
     tool_name: str | None = Field(default=None, description="调用的工具名称")
@@ -106,12 +107,39 @@ class AgentResponse(BaseModel):
     """
     status: str = Field(..., description="执行状态，例如 finished、failed、max_steps_reached")
     answer: str = Field(..., description="Agent 最终回答")
+    task_plan: dict[str, Any] | None = Field(default=None, description="执行前任务规划结果")
     steps: list[AgentStep] = Field(default_factory=list, description="Agent 执行轨迹")
 
     error: AgentError | None = Field(default=None, description="错误信息，成功时为空")
     pending_action: PendingAction | None = Field(default=None, description="等待用户确认的动作")
     run_id: str | None = Field(default=None, description="本次 Agent 运行日志 ID")
     log_path: str | None = Field(default=None, description="运行日志保存路径")
+
+
+class TaskPlanRequest(BaseModel):
+    message: str = Field(default="", description="用户任务描述")
+
+
+class TaskPlanStep(BaseModel):
+    index: int = Field(..., description="步骤编号")
+    title: str = Field(..., description="步骤标题")
+    description: str = Field(..., description="步骤说明")
+    suggested_tool: str | None = Field(default=None, description="建议使用的工具")
+    risk_level: str = Field(..., description="步骤风险等级")
+    reason: str = Field(..., description="规划该步骤的原因")
+
+
+class TaskPlanResponse(BaseModel):
+    objective: str = Field(..., description="标准化后的任务目标")
+    intents: list[str] = Field(default_factory=list, description="识别出的任务意图")
+    target_paths: list[str] = Field(default_factory=list, description="识别出的目标路径")
+    suggested_tools: list[str] = Field(default_factory=list, description="建议使用的工具列表")
+    risk_level: str = Field(..., description="整体任务风险等级")
+    complexity: str = Field(..., description="任务复杂度")
+    needs_approval: bool = Field(..., description="是否需要用户审批")
+    estimated_steps: int = Field(..., description="预计步骤数")
+    steps: list[TaskPlanStep] = Field(default_factory=list, description="任务规划步骤")
+    warnings: list[str] = Field(default_factory=list, description="风险提醒或执行建议")
 
 
 class AgentRunSummary(BaseModel):

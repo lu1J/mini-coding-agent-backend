@@ -23,19 +23,19 @@ def get_now_iso() -> str:
     """
     return datetime.now().isoformat(timespec="seconds")
 
-
 def save_agent_run(
-    *,
-    agent_name: str,
-    user_message: str,
-    status: str,
-    answer: str,
-    steps: list[dict[str, Any]],
-    max_steps: int,
-    model_name: str,
-    error: dict[str, Any] | None = None,
-    pending_action: dict[str, Any] | None = None,
-) -> dict[str, str]:
+        *,
+        agent_name: str,
+        user_message: str,
+        status: str,
+        answer: str,
+        steps: list[dict[str, Any]],
+        max_steps: int,
+        model_name: str,
+        error: dict[str, Any] | None = None,
+        pending_action: dict[str, Any] | None = None,
+        task_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     保存一次 Agent 运行日志。
 
@@ -53,6 +53,7 @@ def save_agent_run(
         "model_name": model_name,
         "status": status,
         "user_message": user_message,
+        "task_plan": task_plan,
         "answer": answer,
         "max_steps": max_steps,
         "steps": steps,

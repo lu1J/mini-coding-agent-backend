@@ -1182,3 +1182,21 @@ context_stats 新增 summary_used 字段
 - 达到 max_steps 执行上限
 
 该功能提升了 CodeAgent 的错误恢复能力和执行日志可解释性。
+
+### v0.6.0：Task Planner 任务规划器
+
+本版本新增规则版 Task Planner，用于在 Agent 执行前对用户任务进行结构化规划。
+
+Task Planner 支持：
+- 识别任务意图：读取、搜索、分析、修改、测试、Git 操作等。
+- 提取目标路径：例如 `demo_project/main.py`。
+- 推荐可能需要使用的工具。
+- 估计任务风险等级：low / medium / high。
+- 估计任务复杂度：simple / medium / complex。
+- 生成结构化执行步骤。
+- 给出风险提醒和执行建议。
+
+新增接口：
+
+```http
+POST /agent/plan

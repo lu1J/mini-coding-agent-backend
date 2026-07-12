@@ -13,6 +13,7 @@ from app.tools.file_tools import AVAILABLE_FILE_TOOLS
 from app.agent.agent_stream import run_code_agent_stream
 from openai import APIConnectionError, APIError, APIStatusError
 from app.memory.context_manager import build_context_window
+from app.agent.task_planner import build_task_plan
 
 from app.memory.conversation_store import (
     create_conversation as store_create_conversation,
@@ -36,6 +37,8 @@ from app.schemas import (
     HistoryChatRequest,
     AgentRequest,
     AgentResponse,
+    TaskPlanRequest,
+    TaskPlanResponse,
     AgentRunListResponse,
     AgentRunDetail,
     ApprovalExecuteRequest,
@@ -486,6 +489,16 @@ def hello_agent(req: AgentRequest):
         user_message=req.message,
         max_steps=req.max_steps
     )
+
+@app.post("/agent/plan", response_model=TaskPlanResponse)
+def create_agent_plan(request: TaskPlanRequest):
+    """
+    根据用户任务生成结构化执行计划。
+
+    注意：
+    这个接口只做规划，不执行工具，不修改文件，不调用模型。
+    """
+    return build_task_plan(request.message)
 
 @app.post(
     "/agent/code",

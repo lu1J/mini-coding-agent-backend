@@ -2,6 +2,7 @@ import json
 import time
 from datetime import datetime
 from typing import Any, Callable
+from app.agent.task_planner import build_task_plan
 
 from app.agent.run_logger import save_agent_run
 from app.agent.status import (
@@ -246,17 +247,17 @@ def execute_tool(
             }
         }
 
-
 def build_result_with_log(
-    *,
-    agent_name: str,
-    user_message: str,
-    status: str,
-    answer: str,
-    steps: list[dict[str, Any]],
-    max_steps: int,
-    error: dict[str, Any] | None = None,
-    pending_action: dict[str, Any] | None = None,
+        *,
+        agent_name: str,
+        user_message: str,
+        status: str,
+        answer: str,
+        steps: list[dict[str, Any]],
+        max_steps: int,
+        error: dict[str, Any] | None = None,
+        pending_action: dict[str, Any] | None = None,
+        task_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     构建 Agent 返回结果，并保存运行日志。
@@ -264,6 +265,7 @@ def build_result_with_log(
     result = {
         "status": status,
         "answer": answer,
+        "task_plan": task_plan,
         "steps": steps,
         "error": error,
         "pending_action": pending_action,
@@ -280,6 +282,7 @@ def build_result_with_log(
             model_name=llm.model,
             error=error,
             pending_action=pending_action,
+            task_plan=task_plan,
         )
         result.update(log_info)
     except Exception as e:
@@ -314,6 +317,10 @@ def run_agent_loop(
 
     steps = []
 
+    task_plan = build_task_plan(user_message)
+
+    step_counter = 0
+
     reflection_retry_count = 0
     max_reflection_retries = 1
 
@@ -337,8 +344,11 @@ def run_agent_loop(
                 "detail": str(e),
             }
 
+            step_counter += 1
+
             steps.append({
-                "step": step_index,
+                "step": step_counter,
+                "model_round": step_index,
                 "type": "model_call",
                 "success": False,
                 "error": error,
@@ -356,6 +366,7 @@ def run_agent_loop(
                 steps=steps,
                 max_steps=max_steps,
                 error=error,
+                task_plan=task_plan,
             )
 
         model_ended_at = now_iso()
@@ -367,8 +378,11 @@ def run_agent_loop(
         if not assistant_message.tool_calls:
             final_answer = assistant_message.content or ""
 
+            step_counter += 1
+
             steps.append({
-                "step": step_index,
+                "step": step_counter,
+                "model_round": step_index,
                 "type": "final_answer",
                 "content": final_answer,
                 "success": True,
@@ -385,6 +399,7 @@ def run_agent_loop(
                 answer=final_answer,
                 steps=steps,
                 max_steps=max_steps,
+                task_plan=task_plan,
             )
 
         # 情况 2：模型请求调用工具
@@ -410,8 +425,11 @@ def run_agent_loop(
                         "detail": str(e),
                     }
 
+                    step_counter += 1
+
                     steps.append({
-                        "step": step_index,
+                        "step": step_counter,
+                        "model_round": step_index,
                         "type": "approval_required",
                         "tool_name": tool_name,
                         "tool_args": {},
@@ -431,6 +449,7 @@ def run_agent_loop(
                         steps=steps,
                         max_steps=max_steps,
                         error=error,
+                        task_plan=task_plan,
                     )
 
                 pending_action = save_pending_action(
@@ -442,8 +461,11 @@ def run_agent_loop(
                     reason=f"工具 {tool_name} 风险等级为 {risk_level}，需要用户确认后才能执行。",
                 )
 
+                step_counter += 1
+
                 steps.append({
-                    "step": step_index,
+                    "step": step_counter,
+                    "model_round": step_index,
                     "type": "approval_required",
                     "tool_name": tool_name,
                     "tool_args": tool_args,
@@ -465,6 +487,7 @@ def run_agent_loop(
                     steps=steps,
                     max_steps=max_steps,
                     pending_action=pending_action,
+                    task_plan=task_plan,
                 )
             tool_started_at = now_iso()
             tool_start_time = time.perf_counter()
@@ -509,8 +532,11 @@ def run_agent_loop(
                         f"建议下一步工具：{reflection.get('next_action_hint') or '无'}"
                     )
 
+            step_counter += 1
+
             steps.append({
-                "step": step_index,
+                "step": step_counter,
+                "model_round": step_index,
                 "type": "tool_call",
                 "tool_name": executed_tool_name,
                 "tool_args": tool_execution["tool_args"],
@@ -539,8 +565,11 @@ def run_agent_loop(
         user_message=user_message,
     )
 
+    step_counter += 1
+
     steps.append({
-        "step": len(steps) + 1,
+        "step": step_counter,
+        "model_round": max_steps,
         "type": "reflection",
         "content": "Agent 达到最大执行步数，生成失败自省结果。",
         "success": False,
@@ -562,4 +591,5 @@ def run_agent_loop(
         answer=answer,
         steps=steps,
         max_steps=max_steps,
+        task_plan=task_plan,
     )
