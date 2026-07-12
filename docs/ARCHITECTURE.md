@@ -532,6 +532,30 @@ demo_project 是可再生的演示沙盒
 避免污染主项目 Git 仓库
 ```
 
+## Self-Reflection Retry
+
+Self-Reflection Retry 是 CodeAgent 的失败诊断与恢复模块。
+
+当工具调用失败时，Agent Loop 会根据工具执行结果生成结构化 reflection。reflection 会被写入当前 step，并在允许重试时作为增强 tool message 反馈给模型，使模型能够在下一轮根据失败原因重新规划。
+
+核心流程：
+
+```text
+工具调用
+↓
+工具执行失败
+↓
+识别错误类型
+↓
+生成 reflection
+↓
+写入 step 日志
+↓
+判断是否允许 retry
+↓
+将 reflection 注入 tool message
+↓
+模型下一轮重新规划
 ---
 
 ## 14. 当前架构亮点

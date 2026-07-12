@@ -629,3 +629,21 @@ max_tokens：摘要生成最大输出 token 数。
   "reason": null
 }
 ```
+
+### Reflection 字段
+
+当工具执行失败或 Agent 达到最大执行步数时，`steps` 中可能出现 `reflection` 字段。
+
+示例：
+
+```json
+{
+  "trigger": "tool_error",
+  "failed_tool": "read_file",
+  "error_type": "file_not_found",
+  "error_message": "工具返回文件或路径不存在。",
+  "analysis": "工具 read_file 执行失败，错误类型为 file_not_found。",
+  "suggestion": "目标文件或路径不存在。建议先查看 workspace 文件结构，确认文件路径是否正确。",
+  "can_retry": true,
+  "next_action_hint": "list_files"
+}

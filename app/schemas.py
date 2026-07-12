@@ -93,6 +93,8 @@ class AgentStep(BaseModel):
 
     success: bool | None = Field(default=None, description="该步骤是否执行成功")
     error: AgentError | None = Field(default=None, description="该步骤的错误信息")
+    reflection: dict[str, Any] | None = Field(default=None, description="失败自省结果")
+    retry_from_reflection: bool | None = Field(default=None, description="是否根据失败自省进入重试提示")
     started_at: str | None = Field(default=None, description="步骤开始时间")
     ended_at: str | None = Field(default=None, description="步骤结束时间")
     duration_ms: int | None = Field(default=None, description="步骤耗时，单位毫秒")

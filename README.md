@@ -8,6 +8,49 @@
 
 ## 1. 当前版本
 
+## v0.5.0 - Self-Reflection Retry 失败自省与重试提示
+
+### 新增功能
+- 新增 `app/agent/reflection.py`，实现规则版失败自省模块。
+- 支持工具失败时生成结构化 reflection，包括：
+  - 触发原因
+  - 失败工具
+  - 错误类型
+  - 错误信息
+  - 分析说明
+  - 修复建议
+  - 是否允许重试
+  - 建议下一步工具
+- Agent Loop 支持在工具失败时把 reflection 写入当前 step。
+- Agent Loop 支持将 reflection 作为增强工具结果反馈给模型，引导模型下一轮重新规划。
+- 新增 `retry_from_reflection` 字段，用于标记该步骤是否触发了 Reflection Retry。
+- 支持 max_steps 达到上限时追加 reflection step。
+- 支持旧版字符串工具结果的错误识别，例如：
+  - 文件不存在
+  - 路径不存在
+  - 权限错误
+  - 命令执行失败
+
+### 修改内容
+- `AgentStep` 新增 `reflection` 字段。
+- `AgentStep` 新增 `retry_from_reflection` 字段。
+- `agent_loop.py` 新增工具失败判断逻辑。
+- `execute_tool()` 支持从旧工具字符串结果中推断错误。
+- 更新项目自检脚本，纳入 Reflection 相关测试文件。
+
+### 新增测试
+- `tests/test_reflection.py`
+- `tests/test_reflection_schema.py`
+- `tests/test_agent_loop_reflection.py`
+- `tests/test_agent_loop_reflection_retry.py`
+- `tests/test_agent_loop_max_steps_reflection.py`
+- `tests/test_agent_loop_legacy_tool_error.py`
+
+### 说明
+- 当前 Reflection 是规则版，不依赖额外 LLM 调用。
+- 当前每次 Agent 任务最多触发一次 Reflection Retry，避免无限重试。
+- 当前 Reflection Retry 不会重新启动整个任务，而是在同一个 Agent Loop 中把失败自省结果反馈给模型。
+
 ```text
 v0.4.0
 ```
@@ -1072,6 +1115,43 @@ v1.0.0：完整 Mini Coding Agent Demo 版本
 
 ## 23. 版本记录
 
+### v0.1.0
+
+```text
+完成基础 Agent Loop
+完成 Tool Calling
+完成文件工具、Git 工具、命令工具
+完成高风险审批机制
+完成运行日志
+完成 SSE 流式输出
+完成 Agent Eval
+完成基础工程化封版
+```
+
+
+### v0.2.0
+
+```text
+新增 conversation_id
+新增本地 JSON 会话持久化
+新增 /conversations 系列接口
+新增 /chat/memory 多轮记忆聊天接口
+测试数量增加到 33 passed
+```
+
+
+### v0.3.0
+
+```text
+新增 Context Manager
+支持上下文窗口构建
+支持历史消息裁剪
+支持 token 预算控制
+/chat/memory 返回 context_stats
+测试数量增加到 38 passed
+```
+
+
 ### v0.4.0
 
 ```text
@@ -1088,36 +1168,17 @@ context_stats 新增 summary_used 字段
 测试数量增加到 49 passed
 ```
 
-### v0.3.0
 
-```text
-新增 Context Manager
-支持上下文窗口构建
-支持历史消息裁剪
-支持 token 预算控制
-/chat/memory 返回 context_stats
-测试数量增加到 38 passed
-```
+### v0.5.0：Self-Reflection Retry
 
-### v0.2.0
+本版本新增失败自省与重试提示能力。当工具调用失败时，系统会根据错误类型生成结构化 reflection，记录失败原因、修复建议、是否允许重试以及建议下一步工具。Agent Loop 会将 reflection 写入执行步骤，并在允许重试时把 reflection 作为增强上下文反馈给模型，引导模型下一轮重新规划工具调用。
 
-```text
-新增 conversation_id
-新增本地 JSON 会话持久化
-新增 /conversations 系列接口
-新增 /chat/memory 多轮记忆聊天接口
-测试数量增加到 33 passed
-```
+当前支持的典型场景包括：
+- 文件不存在
+- 路径不存在
+- 权限或安全策略错误
+- 命令执行失败
+- 工具参数错误
+- 达到 max_steps 执行上限
 
-### v0.1.0
-
-```text
-完成基础 Agent Loop
-完成 Tool Calling
-完成文件工具、Git 工具、命令工具
-完成高风险审批机制
-完成运行日志
-完成 SSE 流式输出
-完成 Agent Eval
-完成基础工程化封版
-```
+该功能提升了 CodeAgent 的错误恢复能力和执行日志可解释性。

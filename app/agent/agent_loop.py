@@ -16,6 +16,36 @@ from app.llm.deepseek_client import llm
 from app.agent.approval_store import save_pending_action
 
 from app.agent.tool_policy import get_tool_risk_level, tool_requires_approval
+from app.agent.reflection import (
+    build_max_steps_reflection,
+    build_tool_error_reflection,
+    should_retry_from_reflection,
+)
+
+
+def is_failed_tool_result(tool_result: dict[str, Any] | None) -> bool:
+    """
+    判断工具执行结果是否失败。
+
+    为什么单独写这个函数？
+    因为不同工具返回失败的方式可能不完全一样：
+
+    1. 有些工具会返回 success=False
+    2. 有些工具会返回 error 字段
+    3. 有些工具可能返回结构化 error dict
+
+    统一判断后，agent_loop.py 里会更清晰。
+    """
+    if not isinstance(tool_result, dict):
+        return False
+
+    if tool_result.get("success") is False:
+        return True
+
+    if tool_result.get("error"):
+        return True
+
+    return False
 
 
 def now_iso() -> str:
@@ -30,6 +60,75 @@ def duration_ms(start_time: float) -> int:
     根据开始时间计算耗时，单位毫秒。
     """
     return int((time.perf_counter() - start_time) * 1000)
+
+
+def infer_error_from_legacy_tool_result(result_text: str) -> dict[str, Any] | None:
+    """
+    从旧工具返回的普通字符串中推断是否失败。
+
+    为什么需要这个函数？
+    早期工具可能没有返回：
+    {
+        "success": false,
+        "error": {...}
+    }
+
+    而是直接返回：
+    "文件不存在：xxx"
+
+    如果 agent_loop.py 不识别这些错误文本，
+    就会误判为 success=True，导致 reflection 无法触发。
+    """
+    text = str(result_text or "").strip()
+    lower_text = text.lower()
+
+    if not text:
+        return None
+
+    if (
+        "文件不存在" in text
+        or "路径不存在" in text
+        or "不存在：" in text
+        or "not found" in lower_text
+        or "no such file" in lower_text
+    ):
+        return {
+            "type": "file_not_found",
+            "message": "工具返回文件或路径不存在。",
+            "detail": text,
+        }
+
+    if (
+        "权限" in text
+        or "permission" in lower_text
+        or "denied" in lower_text
+    ):
+        return {
+            "type": "permission_denied",
+            "message": "工具返回权限或安全策略错误。",
+            "detail": text,
+        }
+
+    if (
+        "syntaxerror" in lower_text
+        or "traceback" in lower_text
+        or "退出码" in text
+        or "command failed" in lower_text
+    ):
+        return {
+            "type": "command_failed",
+            "message": "工具返回命令执行失败。",
+            "detail": text,
+        }
+
+    if text.startswith("错误：") or text.startswith("工具执行失败"):
+        return {
+            "type": "tool_error",
+            "message": "工具返回错误信息。",
+            "detail": text,
+        }
+
+    return None
 
 
 def build_clean_tool_calls(tool_calls) -> list[dict[str, Any]]:
@@ -121,13 +220,16 @@ def execute_tool(
             }
 
         # 情况 2：旧工具仍然返回普通字符串
+        tool_result_text = str(raw_result)
+        legacy_error = infer_error_from_legacy_tool_result(tool_result_text)
+
         return {
             "tool_call_id": tool_call.id,
             "tool_name": tool_name,
             "tool_args": tool_args,
-            "tool_result": str(raw_result),
-            "success": True,
-            "error": None,
+            "tool_result": tool_result_text,
+            "success": legacy_error is None,
+            "error": legacy_error,
         }
 
     except Exception as e:
@@ -211,6 +313,9 @@ def run_agent_loop(
     ]
 
     steps = []
+
+    reflection_retry_count = 0
+    max_reflection_retries = 1
 
     for step_index in range(1, max_steps + 1):
         model_started_at = now_iso()
@@ -375,6 +480,35 @@ def run_agent_loop(
             executed_tool_name = tool_execution["tool_name"]
             executed_risk_level = get_tool_risk_level(executed_tool_name)
 
+            reflection = None
+            retry_from_reflection = False
+            tool_message_content = tool_execution["tool_result"]
+
+            if is_failed_tool_result(tool_execution):
+                reflection = build_tool_error_reflection(
+                    tool_name=executed_tool_name,
+                    tool_args=tool_execution["tool_args"],
+                    tool_result=tool_execution,
+                    error=tool_execution.get("error"),
+                )
+
+                if should_retry_from_reflection(
+                        reflection=reflection,
+                        retry_count=reflection_retry_count,
+                        max_retries=max_reflection_retries,
+                ):
+                    retry_from_reflection = True
+                    reflection_retry_count += 1
+
+                    tool_message_content = (
+                        f"{tool_execution['tool_result']}\n\n"
+                        "[失败自省]\n"
+                        f"错误类型：{reflection.get('error_type')}\n"
+                        f"分析：{reflection.get('analysis')}\n"
+                        f"建议：{reflection.get('suggestion')}\n"
+                        f"建议下一步工具：{reflection.get('next_action_hint') or '无'}"
+                    )
+
             steps.append({
                 "step": step_index,
                 "type": "tool_call",
@@ -384,6 +518,8 @@ def run_agent_loop(
                 "tool_result": tool_execution["tool_result"],
                 "success": tool_execution["success"],
                 "error": tool_execution["error"],
+                "reflection": reflection,
+                "retry_from_reflection": retry_from_reflection,
                 "started_at": tool_started_at,
                 "ended_at": tool_ended_at,
                 "duration_ms": duration_ms(tool_start_time),
@@ -392,10 +528,32 @@ def run_agent_loop(
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_execution["tool_call_id"],
-                "content": tool_execution["tool_result"],
+                "content": tool_message_content,
             })
 
     answer = f"{agent_name} 达到最大执行步数，已停止。请简化任务或增加 max_steps。"
+
+    reflection = build_max_steps_reflection(
+        max_steps=max_steps,
+        completed_steps=len(steps),
+        user_message=user_message,
+    )
+
+    steps.append({
+        "step": len(steps) + 1,
+        "type": "reflection",
+        "content": "Agent 达到最大执行步数，生成失败自省结果。",
+        "success": False,
+        "error": {
+            "type": "max_steps_reached",
+            "message": "达到最大执行步数。",
+            "detail": None,
+        },
+        "reflection": reflection,
+        "started_at": now_iso(),
+        "ended_at": now_iso(),
+        "duration_ms": 0,
+    })
 
     return build_result_with_log(
         agent_name=agent_name,
