@@ -554,21 +554,31 @@ def get_agent_run_detail(run_id: str):
     return run_data
 
 
-@app.post("/agent/approvals/{approval_id}/execute", response_model=ApprovalExecuteResponse)
-def execute_approval(approval_id: str, req: ApprovalExecuteRequest):
+@app.post(
+    "/agent/approvals/{approval_id}/execute",
+    response_model=ApprovalExecuteResponse,
+)
+def execute_approval(
+    approval_id: str,
+    req: ApprovalExecuteRequest,
+):
     """
     执行或拒绝一个等待确认的工具动作。
 
-    第一版只负责执行被拦截的工具，不自动续跑 Agent Loop。
+    审批通过后执行工具，并尝试继续运行 CodeAgent。
     """
     try:
         pending_action = read_pending_action(approval_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    risk_level = pending_action.get("risk_level", "high")
 
     if not pending_action:
-        raise HTTPException(status_code=404, detail="待确认动作不存在或已处理")
+        raise HTTPException(
+            status_code=404,
+            detail="待确认动作不存在或已处理",
+        )
+
+    risk_level = pending_action.get("risk_level", "high")
 
     if not req.approved:
         delete_pending_action(approval_id)
@@ -587,7 +597,6 @@ def execute_approval(approval_id: str, req: ApprovalExecuteRequest):
 
     tool_name = pending_action.get("tool_name")
     tool_args = pending_action.get("tool_args") or {}
-    risk_level = pending_action.get("risk_level", "high")
 
     tool_func = AVAILABLE_FILE_TOOLS.get(tool_name)
 
