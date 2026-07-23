@@ -1106,10 +1106,14 @@ Summary Memory 摘要记忆基础能力
 后续迭代方向：
 
 ```text
-v0.7.0：Project NoteTool 项目笔记
-v0.8.0：Codebase Retrieval 轻量代码库检索
-v0.9.0：ContextBuilder 上下文工程升级
-v1.0.0：极简前端演示页 + Docker + Release
+v0.6.1：可靠性基线与文档对齐
+v0.7.0：统一 Agent Engine 与可观测性升级
+v0.8.0：仓库级代码理解与混合检索
+v0.9.0：可靠代码修改闭环
+v0.10.0：Agent Eval 2.0
+v0.11.0：持久化、状态恢复与 LangGraph 对比
+v0.12.0：MCP 工具标准化
+v1.0.0：求职展示版本
 ```
 
 ---

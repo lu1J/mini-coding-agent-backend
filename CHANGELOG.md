@@ -12,10 +12,6 @@ MAJOR.MINOR.PATCH
 
 ---
 
-## v0.1.0 - 基础工程化版本
-
-### 版本定位
-
 ## v0.6.0 - Task Planner 任务规划器
 
 ### 新增功能
@@ -76,6 +72,54 @@ MAJOR.MINOR.PATCH
 - `/agent/plan` 是独立规划接口。
 - `/agent/code` 会自动生成 `task_plan`，然后进入 Agent Loop 执行。
 - 当前 Agent 主链路升级为：Plan → Act → Reflect → Answer。
+
+## v0.5.0 - Self-Reflection Retry 失败自省版本
+
+### 新增功能
+
+- 新增 `app/agent/reflection.py`，集中实现失败分析与重试建议。
+- 工具执行失败时生成结构化 `reflection`。
+- 支持识别工具错误类型，包括文件不存在、命令失败和路径错误等。
+- 支持根据不同错误类型生成：
+  - 错误原因分析；
+  - 用户可理解的说明；
+  - 修复建议；
+  - 推荐的下一步工具；
+  - 是否允许重试。
+- 支持达到 `max_steps` 时生成 reflection。
+- 支持用户拒绝审批时生成 reflection。
+- 支持模型调用失败时生成 reflection。
+- Agent Loop 支持把 reflection 保存到对应执行步骤。
+- Agent Loop 支持把 reflection 作为 retry hint 反馈给模型。
+- 支持限制 reflection 重试次数，避免无限循环。
+- `AgentStep` 新增：
+  - `reflection`
+  - `retry_from_reflection`
+
+### 修改内容
+
+- 优化工具错误结果识别逻辑。
+- 支持识别结构化工具错误。
+- 兼容部分旧版字符串形式的工具错误结果。
+- Agent 运行日志支持保存 reflection。
+- 达到最大执行步数时增加独立 reflection step。
+- 工具失败后，模型下一轮可以读取失败原因和修复建议。
+
+### 新增测试
+
+- `tests/test_reflection.py`
+- `tests/test_reflection_schema.py`
+- `tests/test_agent_loop_reflection.py`
+- `tests/test_agent_loop_reflection_retry.py`
+- `tests/test_agent_loop_max_steps_reflection.py`
+
+### 说明
+
+- 当前 Self-Reflection 是规则驱动的结构化失败分析，不会额外调用一个专门的反思模型。
+- 当前 reflection 最多引导有限次数的重试，避免 Agent 陷入无限循环。
+- Reflection 可以提高失败后的可解释性，但其实际恢复效果仍需要通过更完整的 Eval 验证。
+
+---
 
 ## v0.4.0 - Summary Memory 摘要记忆基础版本
 
@@ -174,6 +218,9 @@ MAJOR.MINOR.PATCH
 - 当前还没有实现摘要记忆、长期记忆、向量记忆和 RAG。
 - 本版本是后续上下文压缩、Summary Memory、长期记忆系统的基础。
 
+## v0.1.0 - 基础工程化版本
+
+### 版本定位
 
 v0.1.0 是 Mini Coding Agent Backend 的第一个阶段性版本。
 
