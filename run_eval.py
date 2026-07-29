@@ -1,13 +1,156 @@
+import hashlib
 import json
+import os
+import platform
+import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
+
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 API_URL = "http://127.0.0.1:8000/agent/code"
-TASK_FILE = Path("eval_tasks.json")
+
+TASK_FILE = PROJECT_ROOT / "eval_tasks.json"
+VERSION_FILE = PROJECT_ROOT / "VERSION"
+LATEST_RESULT_FILE = PROJECT_ROOT / "eval_result.json"
+
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def read_project_version() -> str:
+    """
+    读取 VERSION 文件中的项目版本。
+    """
+
+    if not VERSION_FILE.exists():
+        return "unknown"
+
+    version = VERSION_FILE.read_text(
+        encoding="utf-8",
+    ).strip()
+
+    return version or "unknown"
+
+
+def get_git_commit() -> str:
+    """
+    获取当前 Git 提交哈希。
+
+    获取失败时返回 unknown，
+    不让评估脚本因为 Git 信息失败而崩溃。
+    """
+
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "rev-parse",
+                "HEAD",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            return "unknown"
+
+        return result.stdout.strip() or "unknown"
+
+    except OSError:
+        return "unknown"
+
+
+def is_git_worktree_dirty() -> bool | None:
+    """
+    判断 Git 工作区是否存在未提交修改。
+
+    返回：
+    - True：存在未提交修改；
+    - False：工作区干净；
+    - None：无法获得 Git 状态。
+    """
+
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "status",
+                "--porcelain",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            return None
+
+        return bool(result.stdout.strip())
+
+    except OSError:
+        return None
+
+
+def calculate_file_sha256(path: Path) -> str:
+    """
+    计算文件的 SHA-256。
+
+    使用二进制读取，避免文本编码和换行转换
+    影响读取过程。
+    """
+
+    sha256 = hashlib.sha256()
+
+    with path.open("rb") as file:
+        for chunk in iter(
+            lambda: file.read(8192),
+            b"",
+        ):
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
+
+
+def build_eval_metadata(
+    *,
+    started_at: datetime,
+    finished_at: datetime,
+) -> dict[str, Any]:
+    """
+    构建本次 Agent Eval 的可追溯元数据。
+
+    注意：
+    这里只记录模型名称，不记录 API Key。
+    """
+
+    return {
+        "project_version": read_project_version(),
+        "git_commit": get_git_commit(),
+        "git_worktree_dirty": is_git_worktree_dirty(),
+        "run_started_at": started_at.isoformat(),
+        "run_finished_at": finished_at.isoformat(),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "model_provider": "DeepSeek",
+        "model_name": os.getenv(
+            "DEEPSEEK_MODEL",
+            "unknown",
+        ),
+        "api_url": API_URL,
+        "task_file": TASK_FILE.name,
+        "task_file_sha256": calculate_file_sha256(
+            TASK_FILE
+        ),
+    }
 
 
 def load_tasks() -> list[dict[str, Any]]:
@@ -137,6 +280,8 @@ def check_task(task: dict[str, Any], result: dict[str, Any]) -> tuple[bool, list
 
 
 def main():
+    started_at = datetime.now(timezone.utc)
+
     tasks = load_tasks()
 
     print("=" * 80)
@@ -228,7 +373,15 @@ def main():
     print(f"平均耗时：{avg_duration:.0f} ms")
     print(f"平均工具调用数：{avg_tools:.2f}")
 
+    finished_at = datetime.now(timezone.utc)
+
+    metadata = build_eval_metadata(
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
     output = {
+        "metadata": metadata,
         "total": len(tasks),
         "passed": passed,
         "failed": failed,
@@ -238,12 +391,24 @@ def main():
         "details": details,
     }
 
-    output_path = Path("eval_result.json")
+    output_path = LATEST_RESULT_FILE
     output_path.write_text(
         json.dumps(output, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
+    print()
+    print("Eval Metadata")
+    print("-" * 80)
+    print(f"项目版本：{metadata['project_version']}")
+    print(f"Git Commit：{metadata['git_commit']}")
+    print(
+        "Git 工作区存在未提交修改："
+        f"{metadata['git_worktree_dirty']}"
+    )
+    print(f"模型：{metadata['model_name']}")
+    print(f"任务集 SHA-256：{metadata['task_file_sha256']}")
+    
     print(f"评估结果已保存：{output_path}")
 
 
