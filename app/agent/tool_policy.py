@@ -10,6 +10,12 @@ TOOL_RISK_LEVELS = {
     "read_file": TOOL_RISK_LOW,
     "read_file_lines": TOOL_RISK_LOW,
     "search_code": TOOL_RISK_LOW,
+    "get_python_file_outline": (
+        TOOL_RISK_LOW
+    ),
+    "search_python_symbol": (
+        TOOL_RISK_LOW
+    ),
     "get_file_diff": TOOL_RISK_LOW,
     "get_workspace_diff": TOOL_RISK_LOW,
     "get_git_status": TOOL_RISK_LOW,

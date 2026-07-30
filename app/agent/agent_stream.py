@@ -16,24 +16,15 @@ from app.agent.status import (
 )
 from app.agent.tool_policy import get_tool_risk_level, tool_requires_approval
 from app.llm.deepseek_client import llm
-from app.tools.file_tools import FILE_TOOLS, AVAILABLE_FILE_TOOLS
+from app.agent.code_agent import (
+    CODE_AGENT_SYSTEM_PROMPT,
+    CODE_AGENT_TOOLS,
+    AVAILABLE_CODE_AGENT_TOOLS,
+)
 
 
 CODE_AGENT_STREAM_SYSTEM_PROMPT = (
-    "你是一个安全、谨慎、可审查的代码智能体 CodeAgent。"
-    "你只能通过工具查看和操作 workspace 目录内的文件。"
-    "当用户要求查看项目结构时，调用 list_files。"
-    "当用户要求读取整个小文件时，调用 read_file。"
-    "当用户要求读取指定行、某几行、某个行号附近代码时，调用 read_file_lines。"
-    "当用户要求搜索函数、类、接口、关键词时，调用 search_code。"
-    "当 search_code 找到关键词所在行号后，如需分析上下文，优先调用 read_file_lines。"
-    "当用户要求修改已有文件时，调用 edit_file，但必须先读取或搜索确认原文。"
-    "当用户要求创建新文件时，调用 write_new_file。"
-    "写操作的审批由后端处理，你不要只用自然语言询问确认，而应该发起工具调用。"
-    "当用户要求查看 Git 状态时，调用 get_git_status。"
-    "当用户要求查看 Git diff 时，调用 get_git_diff。"
-    "当用户要求运行语法检查或测试时，调用 run_command。"
-    "最终回答要总结执行了什么、结果如何、是否需要用户注意。"
+    CODE_AGENT_SYSTEM_PROMPT
 )
 
 
@@ -136,7 +127,7 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
             response = llm.client.chat.completions.create(
                 model=llm.model,
                 messages=messages,
-                tools=FILE_TOOLS,
+                tools=CODE_AGENT_TOOLS,
                 tool_choice="auto",
             )
         except Exception as e:
@@ -371,7 +362,9 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
 
             tool_execution = execute_tool(
                 tool_call=tool_call,
-                available_tools=AVAILABLE_FILE_TOOLS,
+                available_tools=(
+                    AVAILABLE_CODE_AGENT_TOOLS
+                ),
             )
 
             tool_ended_at = now_iso()
