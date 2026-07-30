@@ -16,6 +16,8 @@ TOOL_RISK_LEVELS = {
     "search_python_symbol": (
         TOOL_RISK_LOW
     ),
+    "get_python_dependencies": TOOL_RISK_LOW,
+    "analyze_python_impact": TOOL_RISK_LOW,
     "get_file_diff": TOOL_RISK_LOW,
     "get_workspace_diff": TOOL_RISK_LOW,
     "get_git_status": TOOL_RISK_LOW,

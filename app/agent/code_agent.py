@@ -11,6 +11,10 @@ from app.tools.code_structure_tools import (
     CODE_STRUCTURE_TOOLS,
     AVAILABLE_CODE_STRUCTURE_TOOLS,
 )
+from app.tools.python_dependency_tools import (
+    PYTHON_DEPENDENCY_TOOLS,
+    AVAILABLE_PYTHON_DEPENDENCY_TOOLS,
+)
 
 
 CODE_AGENT_SYSTEM_PROMPT = (
@@ -61,6 +65,23 @@ CODE_AGENT_SYSTEM_PROMPT = (
 
     "当用户只需要分析某个函数、接口、类"
     "或关键词附近代码时，不要读取整个文件。"
+    
+    "当用户询问某个 Python 文件导入了哪些"
+    "本地项目模块、依赖哪些文件时，应该调用 "
+    "get_python_dependencies 工具。"
+
+    "当用户准备修改某个 Python 文件，并询问"
+    "可能影响哪些文件、谁依赖这个文件时，"
+    "应该调用 analyze_python_impact 工具。"
+
+    "get_python_dependencies 分析正向依赖，"
+    "也就是当前文件导入了谁；"
+    "analyze_python_impact 分析反向依赖，"
+    "也就是谁导入了当前文件。"
+
+    "影响分析基于静态 import 关系，只能表示"
+    "可能受影响的范围，不能保证运行时一定"
+    "受到影响。最终仍然需要通过测试验证。"
 
     "当用户明确要求修改文件、修改代码、"
     "替换内容时，可以调用 edit_file 工具。"
@@ -147,6 +168,7 @@ CODE_AGENT_SYSTEM_PROMPT = (
 CODE_AGENT_TOOLS = [
     *FILE_TOOLS,
     *CODE_STRUCTURE_TOOLS,
+    *PYTHON_DEPENDENCY_TOOLS,
 ]
 
 
@@ -154,6 +176,7 @@ CODE_AGENT_TOOLS = [
 AVAILABLE_CODE_AGENT_TOOLS = {
     **AVAILABLE_FILE_TOOLS,
     **AVAILABLE_CODE_STRUCTURE_TOOLS,
+    **AVAILABLE_PYTHON_DEPENDENCY_TOOLS,
 }
 
 
