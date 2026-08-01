@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 from datetime import datetime
@@ -21,6 +22,10 @@ from app.agent.reflection import (
     build_max_steps_reflection,
     build_tool_error_reflection,
     should_retry_from_reflection,
+)
+from app.agent.plan_execution_audit import (
+    attach_plan_execution_audit,
+    persist_audit_to_run_log,
 )
 
 
@@ -247,22 +252,76 @@ def execute_tool(
             }
         }
 
-def build_result_with_log(
-        *,
-        agent_name: str,
-        user_message: str,
-        status: str,
-        answer: str,
-        steps: list[dict[str, Any]],
-        max_steps: int,
-        error: dict[str, Any] | None = None,
-        pending_action: dict[str, Any] | None = None,
-        task_plan: dict[str, Any] | None = None,
+def _save_agent_run_compatible(
+    *,
+    agent_name: str,
+    user_message: str,
+    status: str,
+    answer: str,
+    steps: list[dict[str, Any]],
+    max_steps: int,
+    error: dict[str, Any] | None,
+    pending_action: dict[str, Any] | None,
+    task_plan: dict[str, Any] | None,
+    plan_execution_audit: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    构建 Agent 返回结果，并保存运行日志。
+    兼容不同版本的 save_agent_run。
+
+    当前项目的 run_logger 已支持 task_plan；
+    如果后续为它增加 plan_execution_audit 参数，
+    这里会自动把审计写入 Trace。
     """
-    result = {
+    kwargs: dict[str, Any] = {
+        "agent_name": agent_name,
+        "user_message": user_message,
+        "status": status,
+        "answer": answer,
+        "steps": steps,
+        "max_steps": max_steps,
+        "model_name": llm.model,
+        "error": error,
+        "pending_action": pending_action,
+    }
+
+    parameters = inspect.signature(
+        save_agent_run
+    ).parameters
+
+    if "task_plan" in parameters:
+        kwargs["task_plan"] = task_plan
+
+    if "plan_execution_audit" in parameters:
+        kwargs["plan_execution_audit"] = (
+            plan_execution_audit
+        )
+
+    return save_agent_run(**kwargs)
+
+
+def build_result_with_log(
+    *,
+    agent_name: str,
+    user_message: str,
+    status: str,
+    answer: str,
+    steps: list[dict[str, Any]],
+    max_steps: int,
+    error: dict[str, Any] | None = None,
+    pending_action: dict[str, Any] | None = None,
+    task_plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    构建 Agent 返回结果，附加计划—执行审计，
+    然后保存运行日志。
+
+    所有结束状态都会经过这个函数：
+    - finished
+    - failed
+    - waiting_approval
+    - max_steps_reached
+    """
+    result: dict[str, Any] = {
         "status": status,
         "answer": answer,
         "task_plan": task_plan,
@@ -271,22 +330,42 @@ def build_result_with_log(
         "pending_action": pending_action,
     }
 
+    attach_plan_execution_audit(result)
+
     try:
-        log_info = save_agent_run(
+        log_info = _save_agent_run_compatible(
             agent_name=agent_name,
             user_message=user_message,
             status=status,
             answer=answer,
             steps=steps,
             max_steps=max_steps,
-            model_name=llm.model,
             error=error,
             pending_action=pending_action,
             task_plan=task_plan,
+            plan_execution_audit=(
+                result["plan_execution_audit"]
+            ),
         )
         result.update(log_info)
-    except Exception as e:
-        result["log_error"] = f"日志保存失败：{str(e)}"
+
+        audit_log_error = persist_audit_to_run_log(
+            log_info=log_info,
+            plan_execution_audit=(
+                result["plan_execution_audit"]
+            ),
+        )
+
+        if audit_log_error:
+            result["audit_log_error"] = (
+                audit_log_error
+            )
+
+    except Exception as error_value:
+        result["log_error"] = (
+            "日志保存失败："
+            f"{str(error_value)}"
+        )
 
     return result
 

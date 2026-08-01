@@ -110,6 +110,11 @@ class AgentResponse(BaseModel):
     task_plan: dict[str, Any] | None = Field(default=None, description="执行前任务规划结果")
     steps: list[AgentStep] = Field(default_factory=list, description="Agent 执行轨迹")
 
+    plan_execution_audit: dict[str, Any] | None = Field(
+        default=None,
+        description="计划与实际工具执行的一致性审计结果"
+    )
+
     error: AgentError | None = Field(default=None, description="错误信息，成功时为空")
     pending_action: PendingAction | None = Field(default=None, description="等待用户确认的动作")
     run_id: str | None = Field(default=None, description="本次 Agent 运行日志 ID")

@@ -1,9 +1,15 @@
+import inspect
 import json
 import time
 from datetime import datetime
 from typing import Any
 
 from app.agent.agent_loop import build_clean_tool_calls, execute_tool
+from app.agent.plan_execution_audit import (
+    build_plan_execution_audit,
+    persist_audit_to_run_log,
+)
+from app.agent.task_planner import build_task_plan
 from app.agent.approval_store import save_pending_action
 from app.agent.run_logger import save_agent_run
 from app.agent.status import (
@@ -56,23 +62,114 @@ def save_stream_log(
     answer: str,
     max_steps: int,
     steps: list[dict[str, Any]],
+    task_plan: dict[str, Any],
+    plan_execution_audit: dict[str, Any],
     error: dict[str, Any] | None = None,
     pending_action: dict[str, Any] | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """
-    保存流式 Agent 的运行日志。
+    保存流式 Agent 日志。
+
+    通过 inspect.signature 兼容旧版和新版 run_logger。
     """
-    return save_agent_run(
-        agent_name="CodeAgentStream",
-        model_name=llm.model,
-        status=status,
-        user_message=user_message,
-        answer=answer,
-        max_steps=max_steps,
-        steps=steps,
-        error=error,
-        pending_action=pending_action,
+    kwargs: dict[str, Any] = {
+        "agent_name": "CodeAgentStream",
+        "model_name": llm.model,
+        "status": status,
+        "user_message": user_message,
+        "answer": answer,
+        "max_steps": max_steps,
+        "steps": steps,
+        "error": error,
+        "pending_action": pending_action,
+    }
+
+    parameters = inspect.signature(
+        save_agent_run
+    ).parameters
+
+    if "task_plan" in parameters:
+        kwargs["task_plan"] = task_plan
+
+    if "plan_execution_audit" in parameters:
+        kwargs["plan_execution_audit"] = (
+            plan_execution_audit
+        )
+
+    return save_agent_run(**kwargs)
+
+
+def build_stream_terminal_data(
+    *,
+    status: str,
+    user_message: str,
+    answer: str,
+    max_steps: int,
+    steps: list[dict[str, Any]],
+    task_plan: dict[str, Any],
+    error: dict[str, Any] | None = None,
+    pending_action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    为 SSE 的所有结束分支统一构建：
+    - task_plan
+    - plan_execution_audit
+    - Trace 日志信息
+    """
+    plan_execution_audit = (
+        build_plan_execution_audit(
+            task_plan=task_plan,
+            execution_steps=steps,
+        )
     )
+
+    result: dict[str, Any] = {
+        "status": status,
+        "answer": answer,
+        "task_plan": task_plan,
+        "steps": steps,
+        "error": error,
+        "pending_action": pending_action,
+        "plan_execution_audit": (
+            plan_execution_audit
+        ),
+    }
+
+    try:
+        log_info = save_stream_log(
+            status=status,
+            user_message=user_message,
+            answer=answer,
+            max_steps=max_steps,
+            steps=steps,
+            task_plan=task_plan,
+            plan_execution_audit=(
+                plan_execution_audit
+            ),
+            error=error,
+            pending_action=pending_action,
+        )
+        result.update(log_info)
+
+        audit_log_error = persist_audit_to_run_log(
+            log_info=log_info,
+            plan_execution_audit=(
+                plan_execution_audit
+            ),
+        )
+
+        if audit_log_error:
+            result["audit_log_error"] = (
+                audit_log_error
+            )
+
+    except Exception as error_value:
+        result["log_error"] = (
+            "日志保存失败："
+            f"{str(error_value)}"
+        )
+
+    return result
 
 
 def run_code_agent_stream(user_message: str, max_steps: int = 8):
@@ -85,6 +182,7 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
     - 高风险工具会返回 approval_required 并停止
     """
     steps: list[dict[str, Any]] = []
+    task_plan = build_task_plan(user_message)
 
     messages: list[dict[str, Any]] = [
         {
@@ -107,6 +205,7 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
             "user_message": user_message,
             "max_steps": max_steps,
             "created_at": now_iso(),
+            "task_plan": task_plan,
         },
     )
 
@@ -151,24 +250,19 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
             }
             steps.append(step)
 
-            log_info = save_stream_log(
+            terminal_data = build_stream_terminal_data(
                 status=AGENT_STATUS_FAILED,
                 user_message=user_message,
                 answer="模型调用失败，任务已停止。",
                 max_steps=max_steps,
                 steps=steps,
+                task_plan=task_plan,
                 error=error,
             )
 
             yield sse_event(
                 "agent_failed",
-                {
-                    "status": AGENT_STATUS_FAILED,
-                    "answer": "模型调用失败，任务已停止。",
-                    "error": error,
-                    "steps": steps,
-                    **log_info,
-                },
+                terminal_data,
             )
             return
 
@@ -203,12 +297,13 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
             }
             steps.append(step)
 
-            log_info = save_stream_log(
+            terminal_data = build_stream_terminal_data(
                 status=AGENT_STATUS_FINISHED,
                 user_message=user_message,
                 answer=answer,
                 max_steps=max_steps,
                 steps=steps,
+                task_plan=task_plan,
                 error=None,
             )
 
@@ -222,14 +317,7 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
 
             yield sse_event(
                 "agent_finished",
-                {
-                    "status": AGENT_STATUS_FINISHED,
-                    "answer": answer,
-                    "steps": steps,
-                    "error": None,
-                    "pending_action": None,
-                    **log_info,
-                },
+                terminal_data,
             )
             return
 
@@ -274,24 +362,19 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
                     }
                     steps.append(step)
 
-                    log_info = save_stream_log(
+                    terminal_data = build_stream_terminal_data(
                         status=AGENT_STATUS_FAILED,
                         user_message=user_message,
                         answer="工具参数解析失败，任务已停止。",
                         max_steps=max_steps,
                         steps=steps,
+                        task_plan=task_plan,
                         error=error,
                     )
 
                     yield sse_event(
                         "agent_failed",
-                        {
-                            "status": AGENT_STATUS_FAILED,
-                            "answer": "工具参数解析失败，任务已停止。",
-                            "error": error,
-                            "steps": steps,
-                            **log_info,
-                        },
+                        terminal_data,
                     )
                     return
 
@@ -322,26 +405,21 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
 
                 answer = f"CodeAgentStream 准备调用 {tool_name}，需要用户确认后才能继续。"
 
-                log_info = save_stream_log(
+                terminal_data = build_stream_terminal_data(
                     status=AGENT_STATUS_WAITING_APPROVAL,
                     user_message=user_message,
                     answer=answer,
                     max_steps=max_steps,
                     steps=steps,
+                    task_plan=task_plan,
                     error=None,
                     pending_action=pending_action,
                 )
+                terminal_data["step"] = step
 
                 yield sse_event(
                     "approval_required",
-                    {
-                        "status": AGENT_STATUS_WAITING_APPROVAL,
-                        "answer": answer,
-                        "step": step,
-                        "pending_action": pending_action,
-                        "steps": steps,
-                        **log_info,
-                    },
+                    terminal_data,
                 )
                 return
 
@@ -402,23 +480,17 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
     # 达到最大步数
     answer = "CodeAgentStream 达到最大执行步数，已停止。请简化任务或增加 max_steps。"
 
-    log_info = save_stream_log(
+    terminal_data = build_stream_terminal_data(
         status=AGENT_STATUS_MAX_STEPS_REACHED,
         user_message=user_message,
         answer=answer,
         max_steps=max_steps,
         steps=steps,
+        task_plan=task_plan,
         error=None,
     )
 
     yield sse_event(
         "max_steps_reached",
-        {
-            "status": AGENT_STATUS_MAX_STEPS_REACHED,
-            "answer": answer,
-            "steps": steps,
-            "error": None,
-            "pending_action": None,
-            **log_info,
-        },
+        terminal_data,
     )
