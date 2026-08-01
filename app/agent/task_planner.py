@@ -36,6 +36,16 @@ TASK_RISK_LOW = "low"
 TASK_RISK_MEDIUM = "medium"
 TASK_RISK_HIGH = "high"
 
+# ============================================================
+# Planner 元数据
+# ============================================================
+
+PLANNER_VERSION = "2.1"
+
+PLAN_CONFIDENCE_LOW = "low"
+PLAN_CONFIDENCE_MEDIUM = "medium"
+PLAN_CONFIDENCE_HIGH = "high"
+
 
 # ============================================================
 # 基础关键词
@@ -487,6 +497,76 @@ def matches_any_pattern(
     return False
 
 
+def find_matching_keywords(
+    text: str,
+    keywords: list[str],
+) -> list[str]:
+    """
+    返回文本中实际命中的关键词。
+
+    例如：
+
+        text = "请读取并分析 main.py"
+        keywords = ["读取", "查看", "分析"]
+
+    返回：
+
+        ["读取", "分析"]
+
+    与 contains_any_keyword 不同：
+
+    contains_any_keyword
+    只回答有没有命中。
+
+    find_matching_keywords
+    会告诉我们具体命中了哪些词。
+    """
+
+    lower_text = text.lower()
+
+    matched: list[str] = []
+
+    for keyword in keywords:
+        if keyword.lower() in lower_text:
+            matched.append(keyword)
+
+    return deduplicate_keep_order(
+        matched
+    )
+
+
+def find_matching_pattern_indexes(
+    text: str,
+    patterns: list[str],
+) -> list[int]:
+    """
+    返回命中的正则规则编号。
+
+    例如第 1 条和第 3 条规则命中：
+
+        [1, 3]
+
+    不直接把完整正则写入 task_plan，
+    是因为正则表达式很长，
+    会让 Trace 难以阅读。
+    """
+
+    matched_indexes: list[int] = []
+
+    for index, pattern in enumerate(
+        patterns,
+        start=1,
+    ):
+        if re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        ):
+            matched_indexes.append(index)
+
+    return matched_indexes
+
+
 def is_analysis_only_edit_context(
     text: str,
 ) -> bool:
@@ -625,6 +705,573 @@ def detect_task_context(
             is_advisory_check_context(
                 text
             )
+        ),
+    }
+
+
+def build_intent_evidence(
+    *,
+    user_message: str,
+    intents: list[str],
+    context: dict[str, bool],
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    为每个被识别出的意图生成判断证据。
+
+    返回示例：
+
+        {
+            "read": [
+                {
+                    "type": "keyword",
+                    "value": "读取",
+                    "reason": "命中了读取意图关键词。"
+                }
+            ]
+        }
+    """
+
+    text = normalize_task_text(
+        user_message
+    )
+
+    evidence: dict[
+        str,
+        list[dict[str, Any]],
+    ] = {}
+
+    def add_evidence(
+        *,
+        intent: str,
+        evidence_type: str,
+        value: Any,
+        reason: str,
+    ) -> None:
+        """
+        给某个意图增加一条证据。
+        """
+
+        evidence.setdefault(
+            intent,
+            [],
+        ).append(
+            {
+                "type": evidence_type,
+                "value": value,
+                "reason": reason,
+            }
+        )
+
+    # --------------------------------------------------------
+    # 基础关键词证据
+    # --------------------------------------------------------
+
+    for intent in [
+        TASK_INTENT_READ,
+        TASK_INTENT_SEARCH,
+        TASK_INTENT_ANALYZE,
+        TASK_INTENT_GIT,
+        TASK_INTENT_PLAN,
+    ]:
+        if intent not in intents:
+            continue
+
+        matched_keywords = (
+            find_matching_keywords(
+                text,
+                INTENT_KEYWORDS[intent],
+            )
+        )
+
+        for keyword in matched_keywords:
+            add_evidence(
+                intent=intent,
+                evidence_type="keyword",
+                value=keyword,
+                reason=(
+                    f"命中了 {intent} "
+                    "意图关键词。"
+                ),
+            )
+
+    # --------------------------------------------------------
+    # 明确编辑证据
+    # --------------------------------------------------------
+
+    if TASK_INTENT_EDIT in intents:
+        pattern_indexes = (
+            find_matching_pattern_indexes(
+                text,
+                EXPLICIT_EDIT_PATTERNS,
+            )
+        )
+
+        add_evidence(
+            intent=TASK_INTENT_EDIT,
+            evidence_type=(
+                "explicit_pattern"
+            ),
+            value=pattern_indexes,
+            reason=(
+                "识别到明确的写操作命令，"
+                "例如“请修改”或"
+                "“把 A 改成 B”。"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # 明确测试证据
+    # --------------------------------------------------------
+
+    if TASK_INTENT_TEST in intents:
+        pattern_indexes = (
+            find_matching_pattern_indexes(
+                text,
+                EXPLICIT_TEST_PATTERNS,
+            )
+        )
+
+        add_evidence(
+            intent=TASK_INTENT_TEST,
+            evidence_type=(
+                "explicit_pattern"
+            ),
+            value=pattern_indexes,
+            reason=(
+                "识别到明确的测试或"
+                "命令执行请求。"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # 特殊代码理解上下文证据
+    # --------------------------------------------------------
+
+    if context["python_symbol_search"]:
+        add_evidence(
+            intent=TASK_INTENT_SEARCH,
+            evidence_type="context",
+            value="python_symbol_search",
+            reason=(
+                "识别到 Python 类、函数"
+                "或方法定义搜索场景。"
+            ),
+        )
+
+    if context["python_outline"]:
+        add_evidence(
+            intent=TASK_INTENT_ANALYZE,
+            evidence_type="context",
+            value="python_outline",
+            reason=(
+                "识别到 Python 文件"
+                "结构分析场景。"
+            ),
+        )
+
+    if context["python_dependencies"]:
+        add_evidence(
+            intent=TASK_INTENT_ANALYZE,
+            evidence_type="context",
+            value="python_dependencies",
+            reason=(
+                "识别到 Python 正向"
+                "依赖分析场景。"
+            ),
+        )
+
+    if context["python_impact"]:
+        add_evidence(
+            intent=TASK_INTENT_ANALYZE,
+            evidence_type="context",
+            value="python_impact",
+            reason=(
+                "识别到 Python 反向依赖"
+                "与影响范围分析场景。"
+            ),
+        )
+
+    if context["new_file_request"]:
+        add_evidence(
+            intent=TASK_INTENT_EDIT,
+            evidence_type="context",
+            value="new_file_request",
+            reason=(
+                "识别到明确的新建文件请求。"
+            ),
+        )
+
+    return evidence
+
+
+def build_suppressed_intents(
+    *,
+    user_message: str,
+    intents: list[str],
+    context: dict[str, bool],
+) -> list[dict[str, Any]]:
+    """
+    记录文本中出现了关键词，
+    但被上下文规则主动排除的高风险意图。
+
+    主要处理：
+
+    1. 提到“修改”，但只是分析影响；
+    2. 提到“检查”，但只是询问检查建议。
+    """
+
+    text = normalize_task_text(
+        user_message
+    )
+
+    suppressed: list[
+        dict[str, Any]
+    ] = []
+
+    edit_keywords = (
+        find_matching_keywords(
+            text,
+            INTENT_KEYWORDS[
+                TASK_INTENT_EDIT
+            ],
+        )
+    )
+
+    if (
+        edit_keywords
+        and TASK_INTENT_EDIT
+        not in intents
+    ):
+        if context["analysis_only_edit"]:
+            reason = (
+                "编辑关键词出现在修改影响、"
+                "风险或注意事项分析语境中，"
+                "不表示要求立即执行写操作。"
+            )
+        else:
+            reason = (
+                "虽然出现编辑关键词，"
+                "但没有匹配到明确的写操作"
+                "命令形式。"
+            )
+
+        suppressed.append(
+            {
+                "intent": TASK_INTENT_EDIT,
+                "matched_keywords": (
+                    edit_keywords
+                ),
+                "reason": reason,
+            }
+        )
+
+    test_keywords = (
+        find_matching_keywords(
+            text,
+            INTENT_KEYWORDS[
+                TASK_INTENT_TEST
+            ],
+        )
+    )
+
+    if (
+        test_keywords
+        and TASK_INTENT_TEST
+        not in intents
+    ):
+        if context["advisory_check"]:
+            reason = (
+                "测试或检查关键词用于请求"
+                "检查建议、清单或注意事项，"
+                "不表示要求运行测试命令。"
+            )
+        else:
+            reason = (
+                "虽然出现测试相关关键词，"
+                "但没有匹配到明确的测试或"
+                "命令执行请求。"
+            )
+
+        suppressed.append(
+            {
+                "intent": TASK_INTENT_TEST,
+                "matched_keywords": (
+                    test_keywords
+                ),
+                "reason": reason,
+            }
+        )
+
+    return suppressed
+
+
+def estimate_planner_confidence(
+    *,
+    user_message: str,
+    intents: list[str],
+    context: dict[str, bool],
+    suppressed_intents: list[
+        dict[str, Any]
+    ],
+) -> dict[str, Any]:
+    """
+    估计 Planner 对本次判断的置信度。
+
+    这是确定性规则评分，
+    不是机器学习模型概率。
+    """
+
+    text = normalize_task_text(
+        user_message
+    )
+
+    score = 0.55
+    reasons: list[str] = []
+
+    special_context_flags = [
+        name
+        for name in [
+            "python_symbol_search",
+            "python_outline",
+            "python_dependencies",
+            "python_impact",
+            "new_file_request",
+        ]
+        if context[name]
+    ]
+
+    # 命中特定代码任务场景时，
+    # 比普通关键词分析更可靠。
+    if special_context_flags:
+        score += 0.20
+
+        reasons.append(
+            "命中了明确的代码理解"
+            "或文件操作场景。"
+        )
+
+    # 明确写操作模式提高确定性。
+    if TASK_INTENT_EDIT in intents:
+        if is_explicit_edit_request(text):
+            score += 0.15
+
+            reasons.append(
+                "写操作意图由明确命令"
+                "模式确认。"
+            )
+        else:
+            score -= 0.15
+
+            reasons.append(
+                "存在编辑意图，但没有"
+                "明确写操作模式支持。"
+            )
+
+    # 明确测试模式提高确定性。
+    if TASK_INTENT_TEST in intents:
+        if is_explicit_test_request(text):
+            score += 0.15
+
+            reasons.append(
+                "测试意图由明确命令"
+                "模式确认。"
+            )
+        else:
+            score -= 0.15
+
+            reasons.append(
+                "存在测试意图，但没有"
+                "明确执行模式支持。"
+            )
+
+    # 成功识别并抑制歧义高风险意图，
+    # 说明上下文规则提供了额外证据。
+    if suppressed_intents:
+        score += 0.10
+
+        reasons.append(
+            "上下文规则成功排除了"
+            "歧义的高风险意图。"
+        )
+
+    # 意图过多往往说明文本复杂，
+    # 规则判断的不确定性更高。
+    if len(intents) >= 5:
+        score -= 0.10
+
+        reasons.append(
+            "任务同时包含较多意图，"
+            "自然语言歧义可能增加。"
+        )
+
+    # 没有命中任何明显关键词或特殊上下文，
+    # 只能使用 analyze 兜底。
+    all_basic_keywords: list[str] = []
+
+    for keywords in INTENT_KEYWORDS.values():
+        all_basic_keywords.extend(keywords)
+
+    matched_basic_keywords = (
+        find_matching_keywords(
+            text,
+            all_basic_keywords,
+        )
+    )
+
+    if (
+        intents == [TASK_INTENT_ANALYZE]
+        and not matched_basic_keywords
+        and not special_context_flags
+    ):
+        score = min(score, 0.45)
+
+        reasons.append(
+            "没有命中明确关键词，"
+            "当前使用 analyze 默认兜底。"
+        )
+
+    # 限制在 0～1 范围内。
+    score = max(
+        0.0,
+        min(1.0, score),
+    )
+
+    score = round(score, 2)
+
+    if score >= 0.80:
+        level = PLAN_CONFIDENCE_HIGH
+    elif score >= 0.60:
+        level = PLAN_CONFIDENCE_MEDIUM
+    else:
+        level = PLAN_CONFIDENCE_LOW
+
+    return {
+        "score": score,
+        "level": level,
+        "reasons": reasons,
+    }
+
+
+def build_decision_summary(
+    *,
+    intents: list[str],
+    tools: list[str],
+    risk_level: str,
+    suppressed_intents: list[
+        dict[str, Any]
+    ],
+) -> str:
+    """
+    生成一段简短、可读的规划决策摘要。
+    """
+
+    intent_text = (
+        "、".join(intents)
+        if intents
+        else "无"
+    )
+
+    tool_text = (
+        "、".join(tools)
+        if tools
+        else "无"
+    )
+
+    summary = (
+        f"识别意图：{intent_text}；"
+        f"推荐工具：{tool_text}；"
+        f"计划风险：{risk_level}。"
+    )
+
+    if suppressed_intents:
+        suppressed_text = "、".join(
+            item["intent"]
+            for item
+            in suppressed_intents
+        )
+
+        summary += (
+            f" 已根据上下文抑制："
+            f"{suppressed_text}。"
+        )
+
+    return summary
+
+
+def build_planner_meta(
+    *,
+    user_message: str,
+    intents: list[str],
+    tools: list[str],
+    risk_level: str,
+) -> dict[str, Any]:
+    """
+    构建 Planner v2.1 可解释元数据。
+    """
+
+    context = detect_task_context(
+        user_message
+    )
+
+    intent_evidence = (
+        build_intent_evidence(
+            user_message=user_message,
+            intents=intents,
+            context=context,
+        )
+    )
+
+    suppressed_intents = (
+        build_suppressed_intents(
+            user_message=user_message,
+            intents=intents,
+            context=context,
+        )
+    )
+
+    confidence = (
+        estimate_planner_confidence(
+            user_message=user_message,
+            intents=intents,
+            context=context,
+            suppressed_intents=(
+                suppressed_intents
+            ),
+        )
+    )
+
+    active_context_flags = [
+        name
+        for name, enabled
+        in context.items()
+        if enabled
+    ]
+
+    decision_summary = (
+        build_decision_summary(
+            intents=intents,
+            tools=tools,
+            risk_level=risk_level,
+            suppressed_intents=(
+                suppressed_intents
+            ),
+        )
+    )
+
+    return {
+        "version": PLANNER_VERSION,
+        "confidence": confidence,
+        "intent_evidence": (
+            intent_evidence
+        ),
+        "suppressed_intents": (
+            suppressed_intents
+        ),
+        "context_flags": (
+            active_context_flags
+        ),
+        "decision_summary": (
+            decision_summary
         ),
     }
 
@@ -1554,6 +2201,13 @@ def build_task_plan(
         complexity=complexity,
     )
 
+    planner_meta = build_planner_meta(
+        user_message=normalized_message,
+        intents=intents,
+        tools=tools,
+        risk_level=risk_level,
+    )
+
     return {
         "objective": normalized_message,
         "intents": intents,
@@ -1568,4 +2222,9 @@ def build_task_plan(
         "estimated_steps": len(steps),
         "steps": steps,
         "warnings": warnings,
+
+        # Planner v2.1 新增：
+        # 不改变原有字段，
+        # 只增加可解释元数据。
+        "planner_meta": planner_meta,
     }
