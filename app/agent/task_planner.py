@@ -1,8 +1,14 @@
 import re
 from typing import Any
 
-from app.agent.tool_policy import get_tool_risk_level
+from app.agent.tool_policy import (
+    get_tool_risk_level,
+)
 
+
+# ============================================================
+# 任务意图
+# ============================================================
 
 TASK_INTENT_READ = "read"
 TASK_INTENT_SEARCH = "search"
@@ -12,14 +18,32 @@ TASK_INTENT_TEST = "test"
 TASK_INTENT_GIT = "git"
 TASK_INTENT_PLAN = "plan"
 
+
+# ============================================================
+# 任务复杂度
+# ============================================================
+
 TASK_COMPLEXITY_SIMPLE = "simple"
 TASK_COMPLEXITY_MEDIUM = "medium"
 TASK_COMPLEXITY_COMPLEX = "complex"
+
+
+# ============================================================
+# 任务风险
+# ============================================================
 
 TASK_RISK_LOW = "low"
 TASK_RISK_MEDIUM = "medium"
 TASK_RISK_HIGH = "high"
 
+
+# ============================================================
+# 基础关键词
+#
+# edit 和 test 仍然保留在这里，
+# 但是 Planner v2 不会再仅凭一个关键词
+# 就直接认定为编辑或测试任务。
+# ============================================================
 
 INTENT_KEYWORDS = {
     TASK_INTENT_READ: [
@@ -28,7 +52,10 @@ INTENT_KEYWORDS = {
         "看一下",
         "打开",
         "告诉我内容",
-        "内容",
+        "读取代码",
+        "查看代码",
+        "具体代码",
+        "具体实现",
         "read",
         "show",
         "open",
@@ -40,6 +67,7 @@ INTENT_KEYWORDS = {
         "定位",
         "在哪",
         "哪里",
+        "定义位置",
         "find",
         "search",
         "locate",
@@ -54,21 +82,34 @@ INTENT_KEYWORDS = {
         "结构",
         "接口",
         "函数",
+        "依赖",
+        "影响",
+        "风险",
+        "受影响",
+        "兼容性",
+        "调用关系",
+        "检查清单",
+        "注意事项",
         "review",
         "analyze",
         "explain",
+        "impact",
+        "dependency",
     ],
     TASK_INTENT_EDIT: [
         "修改",
         "修复",
         "改成",
+        "改为",
         "新增",
         "创建",
+        "新建",
         "写入",
         "删除",
         "实现",
         "补充",
         "重构",
+        "替换",
         "fix",
         "edit",
         "modify",
@@ -76,17 +117,23 @@ INTENT_KEYWORDS = {
         "write",
         "delete",
         "implement",
+        "refactor",
+        "replace",
     ],
     TASK_INTENT_TEST: [
         "测试",
         "运行",
+        "执行",
+        "验证",
         "检查",
         "pytest",
         "py_compile",
         "单元测试",
+        "集成测试",
         "test",
         "run",
         "check",
+        "verify",
     ],
     TASK_INTENT_GIT: [
         "git",
@@ -110,25 +157,305 @@ INTENT_KEYWORDS = {
 }
 
 
-def normalize_task_text(text: str | None) -> str:
+# ============================================================
+# “分析修改影响”模式
+#
+# 匹配的是：
+# - 如果修改会影响什么
+# - 分析修改风险
+# - 修改后应该检查什么
+#
+# 这些场景只是在讨论修改，
+# 不表示要求 Agent 现在写文件。
+# ============================================================
+
+ANALYSIS_ONLY_EDIT_PATTERNS = [
+    (
+        r"(如果|假如|假设|若|当)"
+        r".{0,25}"
+        r"(修改|改动|重构|删除|新增|替换)"
+        r".{0,40}"
+        r"(影响|风险|注意|检查|会怎样|后果|问题)"
+    ),
+    (
+        r"(分析|评估|查看|说明|告诉我|列出)"
+        r".{0,35}"
+        r"(修改|改动|重构|删除|新增|替换)"
+        r".{0,35}"
+        r"(影响|风险|注意|检查|范围|后果|问题)"
+    ),
+    (
+        r"(修改|改动|重构|删除|新增|替换)"
+        r".{0,25}"
+        r"(前|后)"
+        r".{0,25}"
+        r"(应该|需要|重点|要)"
+        r".{0,12}"
+        r"(检查|注意|验证|测试)"
+    ),
+    (
+        r"(修改|改动|重构|替换)"
+        r".{0,25}"
+        r"(会|可能)"
+        r".{0,12}"
+        r"(影响|导致|引发)"
+    ),
+    (
+        r"(修改|改动|重构)"
+        r".{0,25}"
+        r"(影响范围|受影响文件|依赖方)"
+    ),
+]
+
+
+# ============================================================
+# 明确的写操作请求
+#
+# 只有出现明确命令形式时，
+# 才把任务判断为 edit。
+# ============================================================
+
+EXPLICIT_EDIT_PATTERNS = [
+    (
+        r"(请|帮我|麻烦|直接|现在|立即|需要你)"
+        r".{0,10}"
+        r"(修改|修复|新增|创建|新建|写入|删除|"
+        r"实现|补充|重构|替换)"
+    ),
+    (
+        r"(把|将)"
+        r".{0,60}"
+        r"(改成|改为|替换为|删除|移除|新增|加入)"
+    ),
+    (
+        r"(同步修改|直接修改|执行修改|"
+        r"开始修改|立即修改)"
+    ),
+    (
+        r"^(修改|修复|新增|创建|新建|删除|"
+        r"实现|补充|重构|替换)"
+    ),
+    (
+        r"\b("
+        r"fix|edit|modify|create|write|delete|"
+        r"implement|refactor|replace"
+        r")\b"
+    ),
+]
+
+
+# ============================================================
+# “告诉我检查什么”模式
+#
+# 这些是分析建议，不是运行测试。
+# ============================================================
+
+ADVISORY_CHECK_PATTERNS = [
+    (
+        r"(告诉我|说明|列出|分析|总结)"
+        r".{0,25}"
+        r"(应该|需要|重点|要)"
+        r".{0,12}"
+        r"(检查|验证|测试|注意)"
+    ),
+    (
+        r"(检查|验证|测试)"
+        r"(清单|要点|重点|哪些|什么|建议)"
+    ),
+    (
+        r"(修改|改动|重构)"
+        r".{0,25}"
+        r"(后|前)"
+        r".{0,25}"
+        r"(应该|需要|重点|要)"
+        r".{0,12}"
+        r"(检查|验证|测试|注意)"
+    ),
+    (
+        r"(需要注意什么|应该注意什么|"
+        r"重点看什么|重点检查什么)"
+    ),
+]
+
+
+# ============================================================
+# 明确的测试或命令执行请求
+# ============================================================
+
+EXPLICIT_TEST_PATTERNS = [
+    (
+        r"(请|帮我|麻烦|直接|现在|然后|并且)"
+        r".{0,8}"
+        r"(运行|执行|跑)"
+        r".{0,25}"
+        r"(pytest|py_compile|测试|单元测试|"
+        r"集成测试|命令|项目|脚本|程序)"
+    ),
+    (
+        r"(运行|执行|跑)"
+        r".{0,25}"
+        r"(pytest|py_compile|测试|单元测试|"
+        r"集成测试|检查命令)"
+    ),
+    (
+        r"(帮我测试|帮我验证|进行测试|"
+        r"执行测试|运行测试)"
+    ),
+    (
+        r"(验证|测试)"
+        r".{0,25}"
+        r"(代码|接口|功能|修改|结果)"
+        r".{0,15}"
+        r"(是否|能否|有没有|通过|正确|可用)"
+    ),
+    (
+        r"^(测试|验证|运行|执行|跑)"
+    ),
+    (
+        r"\b(pytest|py_compile)\b"
+    ),
+]
+
+
+# ============================================================
+# 特殊代码理解任务模式
+# ============================================================
+
+PYTHON_SYMBOL_PATTERNS = [
+    (
+        r"(查找|搜索|寻找|定位|在哪|哪里)"
+        r".{0,30}"
+        r"(类|函数|方法|符号)"
+        r".{0,15}"
+        r"(定义|位置|实现)?"
+    ),
+    (
+        r"(类|函数|方法|符号)"
+        r".{0,25}"
+        r"(定义在哪|在哪里定义|定义位置)"
+    ),
+    (
+        r"(class|function|method|symbol)"
+        r".{0,25}"
+        r"(definition|locate|find|search)"
+    ),
+]
+
+
+PYTHON_OUTLINE_PATTERNS = [
+    r"(Python|python).{0,10}(文件|代码).{0,10}(结构|大纲)",
+    r"(代码结构|文件结构|代码大纲|文件大纲)",
+    r"(有哪些|包含哪些).{0,20}(类|函数|方法|import|导入)",
+    r"(类、函数和方法|类和函数|函数和方法)",
+    r"\boutline\b",
+]
+
+
+PYTHON_DEPENDENCY_PATTERNS = [
+    r"(依赖了哪些|依赖哪些|依赖谁)",
+    r"(导入了哪些|导入哪些).{0,15}(本地|项目|模块|文件)?",
+    r"(正向依赖|本地依赖|import 依赖|import依赖)",
+    r"(当前文件|这个文件).{0,20}(依赖|导入).{0,20}(谁|哪些)",
+]
+
+
+PYTHON_IMPACT_PATTERNS = [
+    r"(影响范围|受影响范围|受影响文件)",
+    r"(谁依赖|哪些文件.{0,15}依赖)",
+    r"(直接依赖|间接依赖|反向依赖|依赖方)",
+    (
+        r"(修改|改动|重构|删除|替换)"
+        r".{0,30}"
+        r"(影响|受影响|风险)"
+    ),
+    (
+        r"(影响|受影响)"
+        r".{0,20}"
+        r"(哪些文件|什么文件|模块)"
+    ),
+]
+
+
+NEW_FILE_PATTERNS = [
+    # 直接识别“创建/新建/生成 + 文件路径”。
+    #
+    # 支持：
+    # 请创建 demo_project/config.json 文件
+    # 新建 app/services/user_service.py
+    # 生成 README.md
+    (
+        r"(请|帮我|麻烦|直接)?"
+        r"\s*"
+        r"(创建|新建|生成)"
+        r"\s+"
+        r"[`\"']?"
+        r"[A-Za-z0-9_\-./\\]+"
+        r"\."
+        r"(py|md|json|txt|yaml|yml)"
+        r"[`\"']?"
+        r"\s*"
+        r"(文件)?"
+    ),
+
+    # 兼容没有明确扩展名的自然语言表达。
+    #
+    # 原来是 {0,25}，路径稍长就会匹配失败。
+    # 增大为 {0,80}，但仍然限制最大距离，
+    # 避免规则匹配到完全无关的长句。
+    (
+        r"(创建|新建|生成)"
+        r".{0,80}"
+        r"(文件|README|配置)"
+    ),
+
+    # 例如：
+    # 新增一个配置文件
+    (
+        r"(新增)"
+        r".{0,40}"
+        r"(文件)"
+    ),
+
+    # 英文：
+    # create config.json file
+    (
+        r"\b(create|generate)"
+        r".{0,60}"
+        r"(file)\b"
+    ),
+]
+
+
+def normalize_task_text(
+    text: str | None,
+) -> str:
     """
     统一清理用户任务文本。
 
-    这个函数的作用：
-    - 处理 None
-    - 去掉首尾空格
-    - 把连续空白压缩成一个空格
+    作用：
+    - 处理 None；
+    - 去掉首尾空格；
+    - 把连续空白压缩成一个空格。
     """
+
     if not text:
         return ""
 
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
 
 
-def contains_any_keyword(text: str, keywords: list[str]) -> bool:
+def contains_any_keyword(
+    text: str,
+    keywords: list[str],
+) -> bool:
     """
     判断文本中是否包含任意关键词。
     """
+
     lower_text = text.lower()
 
     for keyword in keywords:
@@ -138,45 +465,263 @@ def contains_any_keyword(text: str, keywords: list[str]) -> bool:
     return False
 
 
-def detect_task_intents(user_message: str) -> list[str]:
+def matches_any_pattern(
+    text: str,
+    patterns: list[str],
+) -> bool:
+    """
+    判断文本是否匹配任意正则表达式。
+
+    re.IGNORECASE：
+    英文匹配时不区分大小写。
+    """
+
+    for pattern in patterns:
+        if re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
+    return False
+
+
+def is_analysis_only_edit_context(
+    text: str,
+) -> bool:
+    """
+    判断文本中的“修改”是否只是分析语境。
+
+    例如：
+    - 如果修改会影响什么？
+    - 修改后应该检查什么？
+    """
+
+    return matches_any_pattern(
+        text,
+        ANALYSIS_ONLY_EDIT_PATTERNS,
+    )
+
+
+def is_explicit_edit_request(
+    text: str,
+) -> bool:
+    """
+    判断用户是否明确要求执行写操作。
+
+    先识别明确命令；
+    如果只是影响分析，则不算 edit。
+    """
+
+    if not contains_any_keyword(
+        text,
+        INTENT_KEYWORDS[TASK_INTENT_EDIT],
+    ):
+        return False
+
+    explicit_request = matches_any_pattern(
+        text,
+        EXPLICIT_EDIT_PATTERNS,
+    )
+
+    if explicit_request:
+        return True
+
+    if is_analysis_only_edit_context(text):
+        return False
+
+    return False
+
+
+def is_advisory_check_context(
+    text: str,
+) -> bool:
+    """
+    判断“检查”是否只是建议或分析语境。
+
+    例如：
+    - 告诉我应该检查什么；
+    - 列出检查清单。
+    """
+
+    return matches_any_pattern(
+        text,
+        ADVISORY_CHECK_PATTERNS,
+    )
+
+
+def is_explicit_test_request(
+    text: str,
+) -> bool:
+    """
+    判断用户是否明确要求运行测试或命令。
+    """
+
+    explicit_request = matches_any_pattern(
+        text,
+        EXPLICIT_TEST_PATTERNS,
+    )
+
+    if explicit_request:
+        return True
+
+    if is_advisory_check_context(text):
+        return False
+
+    return False
+
+
+def detect_task_context(
+    user_message: str,
+) -> dict[str, bool]:
+    """
+    识别任务中的特殊代码理解场景。
+
+    这些场景会影响 Planner 推荐什么工具。
+    """
+
+    text = normalize_task_text(
+        user_message
+    )
+
+    return {
+        "python_symbol_search": (
+            matches_any_pattern(
+                text,
+                PYTHON_SYMBOL_PATTERNS,
+            )
+        ),
+        "python_outline": (
+            matches_any_pattern(
+                text,
+                PYTHON_OUTLINE_PATTERNS,
+            )
+        ),
+        "python_dependencies": (
+            matches_any_pattern(
+                text,
+                PYTHON_DEPENDENCY_PATTERNS,
+            )
+        ),
+        "python_impact": (
+            matches_any_pattern(
+                text,
+                PYTHON_IMPACT_PATTERNS,
+            )
+        ),
+        "new_file_request": (
+            matches_any_pattern(
+                text,
+                NEW_FILE_PATTERNS,
+            )
+        ),
+        "analysis_only_edit": (
+            is_analysis_only_edit_context(
+                text
+            )
+        ),
+        "advisory_check": (
+            is_advisory_check_context(
+                text
+            )
+        ),
+    }
+
+
+def detect_task_intents(
+    user_message: str,
+) -> list[str]:
     """
     根据用户输入判断任务意图。
 
-    一个任务可以有多个意图。
+    Planner v2 的重点：
 
-    例如：
-    “请修改 main.py 并运行测试”
-    会识别出：
-    - edit
-    - test
+    read、search、analyze、git、plan
+    可以继续使用基础关键词。
+
+    edit 和 test 必须通过更严格的
+    上下文规则判断。
     """
-    text = normalize_task_text(user_message)
+
+    text = normalize_task_text(
+        user_message
+    )
 
     if not text:
         return [TASK_INTENT_ANALYZE]
 
     intents: list[str] = []
 
-    for intent, keywords in INTENT_KEYWORDS.items():
-        if contains_any_keyword(text, keywords):
+    basic_intents = [
+        TASK_INTENT_READ,
+        TASK_INTENT_SEARCH,
+        TASK_INTENT_ANALYZE,
+        TASK_INTENT_GIT,
+        TASK_INTENT_PLAN,
+    ]
+
+    for intent in basic_intents:
+        keywords = INTENT_KEYWORDS[intent]
+
+        if contains_any_keyword(
+            text,
+            keywords,
+        ):
             intents.append(intent)
 
+    if is_explicit_edit_request(text):
+        intents.append(
+            TASK_INTENT_EDIT
+        )
+
+    if is_explicit_test_request(text):
+        intents.append(
+            TASK_INTENT_TEST
+        )
+
+    # 即使没有出现“分析”二字，
+    # “如果修改会影响什么”本质上也是分析任务。
+    if (
+        is_analysis_only_edit_context(text)
+        and TASK_INTENT_ANALYZE
+        not in intents
+    ):
+        intents.append(
+            TASK_INTENT_ANALYZE
+        )
+
+    if (
+        is_advisory_check_context(text)
+        and TASK_INTENT_ANALYZE
+        not in intents
+    ):
+        intents.append(
+            TASK_INTENT_ANALYZE
+        )
+
     if not intents:
-        intents.append(TASK_INTENT_ANALYZE)
+        intents.append(
+            TASK_INTENT_ANALYZE
+        )
 
-    return deduplicate_keep_order(intents)
+    return deduplicate_keep_order(
+        intents
+    )
 
 
-def deduplicate_keep_order(items: list[str]) -> list[str]:
+def deduplicate_keep_order(
+    items: list[str],
+) -> list[str]:
     """
     去重，但保持原顺序。
 
-    为什么不用 set？
-    因为 set 会打乱顺序。
-    任务规划里顺序很重要。
+    不能直接使用 set，
+    因为 set 不保证原始顺序。
     """
-    seen = set()
-    result = []
+
+    seen: set[str] = set()
+    result: list[str] = []
 
     for item in items:
         if item in seen:
@@ -188,29 +733,48 @@ def deduplicate_keep_order(items: list[str]) -> list[str]:
     return result
 
 
-def extract_target_paths(user_message: str) -> list[str]:
+def extract_target_paths(
+    user_message: str,
+) -> list[str]:
     """
     从用户任务中提取可能的文件或目录路径。
 
-    支持几类常见写法：
+    支持：
     - demo_project/main.py
     - `demo_project/main.py`
     - app/agent/agent_loop.py
     - tests/test_xxx.py
     """
-    text = normalize_task_text(user_message)
+
+    text = normalize_task_text(
+        user_message
+    )
 
     if not text:
         return []
 
-    path_pattern = r"`?([A-Za-z0-9_\-./\\]+(?:\.py|\.md|\.json|\.txt|\.yaml|\.yml|/|\\)[A-Za-z0-9_\-./\\]*)`?"
+    path_pattern = (
+        r"`?"
+        r"([A-Za-z0-9_\-./\\]+"
+        r"(?:\.py|\.md|\.json|\.txt|"
+        r"\.yaml|\.yml|/|\\)"
+        r"[A-Za-z0-9_\-./\\]*)"
+        r"`?"
+    )
 
-    matches = re.findall(path_pattern, text)
+    matches = re.findall(
+        path_pattern,
+        text,
+    )
 
-    cleaned_paths = []
+    cleaned_paths: list[str] = []
 
     for path in matches:
-        cleaned = path.strip("`").strip()
+        cleaned = (
+            path
+            .strip("`")
+            .strip()
+        )
 
         if not cleaned:
             continue
@@ -220,90 +784,199 @@ def extract_target_paths(user_message: str) -> list[str]:
 
         cleaned_paths.append(cleaned)
 
-    return deduplicate_keep_order(cleaned_paths)
+    return deduplicate_keep_order(
+        cleaned_paths
+    )
 
 
-def estimate_task_complexity(intents: list[str], target_paths: list[str], user_message: str) -> str:
+def estimate_task_complexity(
+    intents: list[str],
+    target_paths: list[str],
+    user_message: str,
+) -> str:
     """
     粗略估计任务复杂度。
 
     simple：
-    - 单纯读取一个文件
-    - 简单查看内容
+    - 单纯读取一个文件；
+    - 简单查看状态。
 
     medium：
-    - 搜索、分析、测试
-    - 多个文件
+    - 符号搜索；
+    - 结构分析；
+    - 依赖和影响分析；
+    - 普通测试。
 
     complex：
-    - 修改代码
-    - 同时包含 edit + test
-    - 用户要求完整分析、所有文件、潜在问题
+    - 修改代码；
+    - 修改并测试；
+    - 完整项目分析。
     """
-    text = normalize_task_text(user_message)
+
+    text = normalize_task_text(
+        user_message
+    )
+
+    context = detect_task_context(
+        text
+    )
 
     if TASK_INTENT_EDIT in intents:
         return TASK_COMPLEXITY_COMPLEX
 
-    if TASK_INTENT_TEST in intents and len(intents) >= 2:
+    if (
+        TASK_INTENT_TEST in intents
+        and len(intents) >= 2
+    ):
         return TASK_COMPLEXITY_COMPLEX
 
-    if "所有文件" in text or "完整分析" in text or "潜在问题" in text:
+    if (
+        "所有文件" in text
+        or "完整分析" in text
+        or "全部分析" in text
+        or "潜在问题" in text
+    ):
         return TASK_COMPLEXITY_COMPLEX
 
     if len(target_paths) >= 2:
         return TASK_COMPLEXITY_MEDIUM
 
-    if TASK_INTENT_ANALYZE in intents or TASK_INTENT_SEARCH in intents or TASK_INTENT_TEST in intents:
+    if (
+        context["python_symbol_search"]
+        or context["python_outline"]
+        or context["python_dependencies"]
+        or context["python_impact"]
+    ):
+        return TASK_COMPLEXITY_MEDIUM
+
+    if (
+        TASK_INTENT_ANALYZE in intents
+        or TASK_INTENT_SEARCH in intents
+        or TASK_INTENT_TEST in intents
+    ):
         return TASK_COMPLEXITY_MEDIUM
 
     return TASK_COMPLEXITY_SIMPLE
 
 
-def estimate_tools_for_intents(intents: list[str]) -> list[str]:
+def estimate_tools_for_intents(
+    intents: list[str],
+    user_message: str = "",
+) -> list[str]:
     """
-    根据任务意图推荐可能需要的工具。
+    根据任务意图和上下文推荐工具。
 
     注意：
-    这里不是实际执行工具，只是规划。
+    这里只生成计划，不执行工具。
+
+    user_message 设置默认值，
+    是为了尽量兼容旧测试或旧调用代码。
     """
+
     tools: list[str] = []
 
-    if TASK_INTENT_PLAN in intents:
-        tools.extend([
-            "list_files",
-        ])
+    context = detect_task_context(
+        user_message
+    )
 
-    if TASK_INTENT_READ in intents:
-        tools.extend([
-            "list_files",
-            "read_file",
-        ])
+    has_special_analysis_tool = False
+
+    # 优先选择最具体的代码理解工具。
+    if context["python_impact"]:
+        tools.append(
+            "analyze_python_impact"
+        )
+        has_special_analysis_tool = True
+
+    elif context["python_dependencies"]:
+        tools.append(
+            "get_python_dependencies"
+        )
+        has_special_analysis_tool = True
+
+    elif context["python_outline"]:
+        tools.append(
+            "get_python_file_outline"
+        )
+        has_special_analysis_tool = True
+
+    elif context["python_symbol_search"]:
+        tools.append(
+            "search_python_symbol"
+        )
+        has_special_analysis_tool = True
+
+    if TASK_INTENT_PLAN in intents:
+        tools.append(
+            "list_files"
+        )
 
     if TASK_INTENT_SEARCH in intents:
-        tools.extend([
-            "list_files",
-            "search_code",
-        ])
+        if not has_special_analysis_tool:
+            tools.extend([
+                "list_files",
+                "search_code",
+            ])
 
     if TASK_INTENT_ANALYZE in intents:
-        tools.extend([
-            "list_files",
-            "read_file",
-            "search_code",
-        ])
+        if not has_special_analysis_tool:
+            tools.extend([
+                "list_files",
+                "read_file",
+                "search_code",
+            ])
+
+    if TASK_INTENT_READ in intents:
+        if context["python_symbol_search"]:
+            tools.append(
+                "read_file_lines"
+            )
+
+        elif (
+            context["python_impact"]
+            or context[
+                "python_dependencies"
+            ]
+        ):
+            tools.append(
+                "read_file"
+            )
+
+        elif not context["python_outline"]:
+            tools.extend([
+                "list_files",
+                "read_file",
+            ])
 
     if TASK_INTENT_EDIT in intents:
-        tools.extend([
-            "read_file",
-            "edit_file",
-            "get_workspace_diff",
-        ])
+        # 修改前先了解影响范围。
+        if (
+            context["python_impact"]
+            and "analyze_python_impact"
+            not in tools
+        ):
+            tools.append(
+                "analyze_python_impact"
+            )
+
+        if context["new_file_request"]:
+            tools.append(
+                "write_new_file"
+            )
+        else:
+            tools.extend([
+                "read_file",
+                "edit_file",
+            ])
+
+        tools.append(
+            "get_workspace_diff"
+        )
 
     if TASK_INTENT_TEST in intents:
-        tools.extend([
-            "run_command",
-        ])
+        tools.append(
+            "run_command"
+        )
 
     if TASK_INTENT_GIT in intents:
         tools.extend([
@@ -317,23 +990,33 @@ def estimate_tools_for_intents(intents: list[str]) -> list[str]:
             "read_file",
         ])
 
-    return deduplicate_keep_order(tools)
+    return deduplicate_keep_order(
+        tools
+    )
 
 
-def estimate_plan_risk(tools: list[str]) -> str:
+def estimate_plan_risk(
+    tools: list[str],
+) -> str:
     """
-    根据推荐工具估计任务风险。
+    根据推荐工具估计风险。
 
-    高风险：
-    - 需要 edit_file / write_new_file / ensure_gitignore 等写操作
+    high：
+    - edit_file；
+    - write_new_file；
+    - 其他写操作。
 
-    中风险：
-    - 需要 run_command
+    medium：
+    - run_command。
 
-    低风险：
-    - 只读工具
+    low：
+    - 只读分析工具。
     """
-    risk_levels = [get_tool_risk_level(tool) for tool in tools]
+
+    risk_levels = [
+        get_tool_risk_level(tool)
+        for tool in tools
+    ]
 
     if TASK_RISK_HIGH in risk_levels:
         return TASK_RISK_HIGH
@@ -354,16 +1037,16 @@ def build_plan_step(
 ) -> dict[str, Any]:
     """
     构建单个计划步骤。
-
-    每个步骤都包含：
-    - 编号
-    - 标题
-    - 描述
-    - 推荐工具
-    - 风险等级
-    - 原因
     """
-    risk_level = get_tool_risk_level(suggested_tool) if suggested_tool else TASK_RISK_LOW
+
+    if suggested_tool:
+        risk_level = (
+            get_tool_risk_level(
+                suggested_tool
+            )
+        )
+    else:
+        risk_level = TASK_RISK_LOW
 
     return {
         "index": index,
@@ -379,113 +1062,383 @@ def build_steps_for_plan(
     intents: list[str],
     target_paths: list[str],
     complexity: str,
+    user_message: str = "",
 ) -> list[dict[str, Any]]:
     """
-    根据任务意图生成执行步骤。
+    根据任务意图和上下文生成执行步骤。
 
-    这是 Task Planner 的核心函数。
+    Planner v2 会优先生成更具体的代码理解步骤，
+    而不是统一使用 list_files + search_code。
     """
+
     steps: list[dict[str, Any]] = []
+    used_tools: set[str] = set()
     index = 1
 
+    context = detect_task_context(
+        user_message
+    )
+
     has_target = bool(target_paths)
-    target_text = "、".join(target_paths) if has_target else "目标工作区"
 
-    if TASK_INTENT_PLAN in intents or TASK_INTENT_ANALYZE in intents or not has_target:
-        steps.append(build_plan_step(
-            index=index,
+    if has_target:
+        target_text = "、".join(
+            target_paths
+        )
+    else:
+        target_text = "目标工作区"
+
+    def append_step(
+        *,
+        title: str,
+        description: str,
+        suggested_tool: str | None,
+        reason: str,
+    ) -> None:
+        """
+        内部辅助函数：
+        增加步骤并自动更新 index。
+        """
+
+        nonlocal index
+
+        steps.append(
+            build_plan_step(
+                index=index,
+                title=title,
+                description=description,
+                suggested_tool=suggested_tool,
+                reason=reason,
+            )
+        )
+
+        if suggested_tool:
+            used_tools.add(
+                suggested_tool
+            )
+
+        index += 1
+
+    # --------------------------------------------------------
+    # 专用分析步骤
+    # --------------------------------------------------------
+
+    if context["python_impact"]:
+        append_step(
+            title="分析 Python 影响范围",
+            description=(
+                f"分析 {target_text} 的反向 import "
+                "依赖，识别直接和间接受影响文件。"
+            ),
+            suggested_tool=(
+                "analyze_python_impact"
+            ),
+            reason=(
+                "用户询问文件修改影响或依赖方，"
+                "应优先使用反向依赖分析工具。"
+            ),
+        )
+
+    elif context["python_dependencies"]:
+        append_step(
+            title="分析 Python 文件依赖",
+            description=(
+                f"分析 {target_text} 导入了哪些"
+                "本地 Python 模块。"
+            ),
+            suggested_tool=(
+                "get_python_dependencies"
+            ),
+            reason=(
+                "用户询问当前文件依赖谁，"
+                "应使用正向依赖分析工具。"
+            ),
+        )
+
+    elif context["python_outline"]:
+        append_step(
+            title="分析 Python 文件结构",
+            description=(
+                f"提取 {target_text} 中的 import、"
+                "类、函数和方法结构。"
+            ),
+            suggested_tool=(
+                "get_python_file_outline"
+            ),
+            reason=(
+                "AST 文件大纲工具比普通文本"
+                "搜索更适合分析代码结构。"
+            ),
+        )
+
+    elif context["python_symbol_search"]:
+        append_step(
+            title="搜索 Python 符号定义",
+            description=(
+                "使用 AST 搜索真实的 Python "
+                "类、函数或方法定义位置。"
+            ),
+            suggested_tool=(
+                "search_python_symbol"
+            ),
+            reason=(
+                "符号搜索可以排除注释、字符串"
+                "和普通文本中的同名内容。"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # 通用计划和搜索
+    # --------------------------------------------------------
+
+    if (
+        TASK_INTENT_PLAN in intents
+        and "list_files" not in used_tools
+    ):
+        append_step(
             title="查看项目结构",
-            description=f"先查看 {target_text} 的目录结构，确认需要处理的文件范围。",
+            description=(
+                f"查看 {target_text} 的目录结构，"
+                "确认任务范围。"
+            ),
             suggested_tool="list_files",
-            reason="在读取或修改文件前，需要先理解项目结构。",
-        ))
-        index += 1
+            reason=(
+                "规划任务前需要了解项目结构。"
+            ),
+        )
 
-    if TASK_INTENT_SEARCH in intents:
-        steps.append(build_plan_step(
-            index=index,
+    if (
+        TASK_INTENT_SEARCH in intents
+        and not (
+            context["python_impact"]
+            or context[
+                "python_dependencies"
+            ]
+            or context["python_outline"]
+            or context[
+                "python_symbol_search"
+            ]
+        )
+    ):
+        append_step(
             title="搜索相关代码",
-            description="根据用户任务中的关键词搜索相关代码位置。",
+            description=(
+                "根据用户任务中的关键词"
+                "搜索相关代码位置。"
+            ),
             suggested_tool="search_code",
-            reason="搜索可以快速定位相关函数、接口或配置。",
-        ))
-        index += 1
+            reason=(
+                "普通关键词、调用位置、字符串"
+                "和配置项适合使用文本搜索。"
+            ),
+        )
 
-    if (TASK_INTENT_READ in intents or TASK_INTENT_ANALYZE in intents) and TASK_INTENT_EDIT not in intents:
-        steps.append(build_plan_step(
-            index=index,
-            title="读取关键文件",
-            description=f"读取与任务相关的关键文件：{target_text}。",
+    # --------------------------------------------------------
+    # 读取步骤
+    # --------------------------------------------------------
+
+    if TASK_INTENT_READ in intents:
+        if context["python_symbol_search"]:
+            append_step(
+                title="读取符号实现代码",
+                description=(
+                    "根据符号搜索返回的起止行号，"
+                    "读取目标符号的局部代码。"
+                ),
+                suggested_tool=(
+                    "read_file_lines"
+                ),
+                reason=(
+                    "局部读取可以减少无关代码"
+                    "和 Token 消耗。"
+                ),
+            )
+
+        elif (
+            context["python_impact"]
+            or context[
+                "python_dependencies"
+            ]
+        ):
+            append_step(
+                title="读取相关依赖文件",
+                description=(
+                    "读取依赖分析得到的关键文件，"
+                    "确认实际使用方式和兼容风险。"
+                ),
+                suggested_tool="read_file",
+                reason=(
+                    "依赖关系只表示文件关系，"
+                    "还需要读取代码确认实际使用点。"
+                ),
+            )
+
+        elif not context["python_outline"]:
+            append_step(
+                title="读取关键文件",
+                description=(
+                    f"读取与任务有关的关键文件："
+                    f"{target_text}。"
+                ),
+                suggested_tool="read_file",
+                reason=(
+                    "读取真实内容后才能进行"
+                    "准确分析。"
+                ),
+            )
+
+    # --------------------------------------------------------
+    # 普通分析兜底
+    # --------------------------------------------------------
+
+    if (
+        TASK_INTENT_ANALYZE in intents
+        and not (
+            context["python_impact"]
+            or context[
+                "python_dependencies"
+            ]
+            or context["python_outline"]
+            or context[
+                "python_symbol_search"
+            ]
+        )
+        and "read_file" not in used_tools
+    ):
+        append_step(
+            title="读取并分析关键文件",
+            description=(
+                f"读取 {target_text} 的真实内容，"
+                "再进行结构和问题分析。"
+            ),
             suggested_tool="read_file",
-            reason="读取文件内容后才能进行准确分析。",
-        ))
-        index += 1
+            reason=(
+                "没有匹配专用分析工具时，"
+                "先读取文件再分析。"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # 编辑步骤
+    # --------------------------------------------------------
 
     if TASK_INTENT_EDIT in intents:
-        steps.append(build_plan_step(
-            index=index,
-            title="读取修改目标",
-            description=f"在修改前读取目标文件，确认当前实现和修改位置：{target_text}。",
-            suggested_tool="read_file",
-            reason="修改前必须先读取原始内容，避免盲改。",
-        ))
-        index += 1
+        if context["new_file_request"]:
+            append_step(
+                title="创建新文件",
+                description=(
+                    "根据用户要求创建新的文件内容。"
+                ),
+                suggested_tool="write_new_file",
+                reason=(
+                    "用户明确要求创建或新建文件。"
+                ),
+            )
 
-        steps.append(build_plan_step(
-            index=index,
-            title="执行代码修改",
-            description="根据任务要求修改文件内容。",
-            suggested_tool="edit_file",
-            reason="用户任务包含修改、修复、新增或实现需求。",
-        ))
-        index += 1
+        else:
+            if "read_file" not in used_tools:
+                append_step(
+                    title="读取修改目标",
+                    description=(
+                        f"修改前读取目标文件："
+                        f"{target_text}。"
+                    ),
+                    suggested_tool="read_file",
+                    reason=(
+                        "修改前必须确认原始内容，"
+                        "避免盲目修改。"
+                    ),
+                )
 
-        steps.append(build_plan_step(
-            index=index,
+            append_step(
+                title="执行代码修改",
+                description=(
+                    "根据用户明确要求修改文件内容。"
+                ),
+                suggested_tool="edit_file",
+                reason=(
+                    "用户明确要求执行写操作。"
+                ),
+            )
+
+        append_step(
             title="查看修改差异",
-            description="修改后查看 workspace diff，确认变更范围是否符合预期。",
-            suggested_tool="get_workspace_diff",
-            reason="修改后必须检查 diff，避免误改其他文件。",
-        ))
-        index += 1
+            description=(
+                "查看 workspace diff，"
+                "确认实际修改范围。"
+            ),
+            suggested_tool=(
+                "get_workspace_diff"
+            ),
+            reason=(
+                "修改后应检查差异，"
+                "避免误改其他内容。"
+            ),
+        )
 
-    if TASK_INTENT_TEST in intents or TASK_INTENT_EDIT in intents:
-        steps.append(build_plan_step(
-            index=index,
+    # --------------------------------------------------------
+    # 测试步骤
+    # --------------------------------------------------------
+
+    if TASK_INTENT_TEST in intents:
+        append_step(
             title="运行验证命令",
-            description="运行合适的测试或语法检查命令，验证修改是否正确。",
+            description=(
+                "运行用户要求的测试、语法检查"
+                "或其他安全白名单命令。"
+            ),
             suggested_tool="run_command",
-            reason="执行测试可以确认代码没有引入明显错误。",
-        ))
-        index += 1
+            reason=(
+                "用户明确要求执行测试或验证。"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # Git 步骤
+    # --------------------------------------------------------
 
     if TASK_INTENT_GIT in intents:
-        steps.append(build_plan_step(
-            index=index,
+        append_step(
             title="查看 Git 状态",
-            description="查看当前 Git 工作区状态。",
+            description=(
+                "查看当前 Git 工作区状态。"
+            ),
             suggested_tool="get_git_status",
-            reason="Git 状态可以帮助确认哪些文件发生了变化。",
-        ))
-        index += 1
+            reason=(
+                "Git 状态可以确认哪些文件"
+                "发生了变化。"
+            ),
+        )
 
-        steps.append(build_plan_step(
-            index=index,
+        append_step(
             title="查看 Git 差异",
-            description="查看 Git diff，确认代码变更内容。",
+            description=(
+                "查看 Git diff，"
+                "检查具体代码变化。"
+            ),
             suggested_tool="get_git_diff",
-            reason="提交或总结前应查看完整差异。",
-        ))
-        index += 1
+            reason=(
+                "提交或总结前应检查完整差异。"
+            ),
+        )
+
+    # --------------------------------------------------------
+    # 复杂任务汇总
+    # --------------------------------------------------------
 
     if complexity == TASK_COMPLEXITY_COMPLEX:
-        steps.append(build_plan_step(
-            index=index,
+        append_step(
             title="汇总结果与风险",
-            description="总结执行结果、关键发现、潜在问题和后续建议。",
+            description=(
+                "总结执行结果、实际修改、"
+                "验证结果和潜在风险。"
+            ),
             suggested_tool=None,
-            reason="复杂任务需要最终汇总，方便用户理解执行结果。",
-        ))
+            reason=(
+                "复杂任务需要最终汇总，"
+                "方便用户审查。"
+            ),
+        )
 
     return steps
 
@@ -496,52 +1449,105 @@ def build_task_warnings(
     complexity: str,
 ) -> list[str]:
     """
-    根据任务风险和复杂度生成提醒。
+    根据风险和复杂度生成提醒。
     """
+
     warnings: list[str] = []
 
     if risk_level == TASK_RISK_HIGH:
-        warnings.append("该任务可能涉及写文件操作，需要用户审批后才能执行高风险工具。")
+        warnings.append(
+            "该任务涉及写文件操作，"
+            "高风险工具执行前需要用户审批。"
+        )
 
     if risk_level == TASK_RISK_MEDIUM:
-        warnings.append("该任务可能涉及命令执行，需要注意命令安全和执行目录。")
+        warnings.append(
+            "该任务涉及命令执行，"
+            "需要注意命令白名单和执行目录。"
+        )
 
-    if complexity == TASK_COMPLEXITY_COMPLEX:
-        warnings.append("该任务较复杂，建议分步骤执行，并在关键节点检查结果。")
+    if (
+        complexity
+        == TASK_COMPLEXITY_COMPLEX
+    ):
+        warnings.append(
+            "该任务较复杂，建议分步骤执行，"
+            "并在关键节点检查结果。"
+        )
 
-    if TASK_INTENT_EDIT in intents and TASK_INTENT_TEST not in intents:
-        warnings.append("任务包含代码修改，但用户未明确要求测试；建议修改后补充验证步骤。")
+    if (
+        TASK_INTENT_EDIT in intents
+        and TASK_INTENT_TEST
+        not in intents
+    ):
+        warnings.append(
+            "任务包含代码修改，但用户未明确"
+            "要求执行测试；可以在修改后建议"
+            "用户进行验证。"
+        )
 
     return warnings
 
 
-def build_task_plan(user_message: str) -> dict[str, Any]:
+def build_task_plan(
+    user_message: str,
+) -> dict[str, Any]:
     """
-    构建任务规划结果。
-
-    这是对外使用的主入口函数。
+    构建 Task Planner v2 结果。
 
     输入：
-    - 用户自然语言任务
+    - 用户自然语言任务。
 
     输出：
-    - 结构化任务计划
+    - 意图；
+    - 路径；
+    - 推荐工具；
+    - 风险；
+    - 复杂度；
+    - 执行步骤；
+    - 警告。
     """
-    normalized_message = normalize_task_text(user_message)
-    intents = detect_task_intents(normalized_message)
-    target_paths = extract_target_paths(normalized_message)
-    tools = estimate_tools_for_intents(intents)
-    risk_level = estimate_plan_risk(tools)
-    complexity = estimate_task_complexity(
-        intents=intents,
-        target_paths=target_paths,
-        user_message=normalized_message,
+
+    normalized_message = (
+        normalize_task_text(
+            user_message
+        )
     )
+
+    intents = detect_task_intents(
+        normalized_message
+    )
+
+    target_paths = extract_target_paths(
+        normalized_message
+    )
+
+    tools = estimate_tools_for_intents(
+        intents,
+        normalized_message,
+    )
+
+    risk_level = estimate_plan_risk(
+        tools
+    )
+
+    complexity = (
+        estimate_task_complexity(
+            intents=intents,
+            target_paths=target_paths,
+            user_message=(
+                normalized_message
+            ),
+        )
+    )
+
     steps = build_steps_for_plan(
         intents=intents,
         target_paths=target_paths,
         complexity=complexity,
+        user_message=normalized_message,
     )
+
     warnings = build_task_warnings(
         intents=intents,
         risk_level=risk_level,
@@ -555,7 +1561,10 @@ def build_task_plan(user_message: str) -> dict[str, Any]:
         "suggested_tools": tools,
         "risk_level": risk_level,
         "complexity": complexity,
-        "needs_approval": risk_level == TASK_RISK_HIGH,
+        "needs_approval": (
+            risk_level
+            == TASK_RISK_HIGH
+        ),
         "estimated_steps": len(steps),
         "steps": steps,
         "warnings": warnings,
