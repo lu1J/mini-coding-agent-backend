@@ -5,10 +5,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from app.agent.plan_parameter_audit import build_parameter_audit
 from app.agent.tool_policy import get_tool_risk_level
 
 
-AUDIT_VERSION = "1.0"
+AUDIT_VERSION = "2.0"
 
 AUDIT_STATUS_ALIGNED = "aligned"
 AUDIT_STATUS_PARTIAL = "partially_aligned"
@@ -548,6 +549,11 @@ def build_plan_execution_audit(
         unplanned_tools=unplanned_tools,
     )
     outcome = calculate_execution_outcome(execution_steps)
+    parameter_audit = build_parameter_audit(
+        task_plan=task_plan,
+        execution_steps=execution_steps,
+        planned_tools=planned_tools,
+    )
 
     status = determine_audit_status(
         executed_tools=executed_tools,
@@ -557,11 +563,25 @@ def build_plan_execution_audit(
         unused_planned_tools=unused_planned_tools,
     )
 
+    # 参数级审计比单纯工具名一致性更具体：
+    # - 计划外写路径；
+    # - 未计划命令执行；
+    # - 无法确认目标的写工具；
+    # 都必须升级为 requires_review。
+    if parameter_audit["requires_review"]:
+        status = AUDIT_STATUS_REVIEW
+    elif (
+        status == AUDIT_STATUS_ALIGNED
+        and parameter_audit["expanded_read_scope"]
+    ):
+        status = AUDIT_STATUS_PARTIAL
+
     deviation_notes = build_deviation_notes(
         unplanned_tools=unplanned_tools,
         unused_planned_tools=unused_planned_tools,
         risk=risk,
     )
+    deviation_notes.extend(parameter_audit["notes"])
 
     summary = build_audit_summary(
         status=status,
@@ -585,8 +605,14 @@ def build_plan_execution_audit(
         "metrics": metrics,
         "risk": risk,
         "outcome": outcome,
+        "parameter_audit": parameter_audit,
         "deviation_notes": deviation_notes,
-        "summary": summary,
+        "summary": (
+            summary
+            + " 参数审计状态为 "
+            + parameter_audit["status"]
+            + "。"
+        ),
     }
 
 
