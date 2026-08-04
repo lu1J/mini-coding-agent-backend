@@ -17,7 +17,14 @@ from app.agent.status import (
 from app.llm.deepseek_client import llm
 from app.agent.approval_store import save_pending_action
 
-from app.agent.tool_policy import get_tool_risk_level, tool_requires_approval
+from app.agent.tool_policy import get_tool_risk_level
+from app.agent.execution_policy_guard import (
+    POLICY_BLOCK,
+    POLICY_GUARD_VERSION,
+    POLICY_REQUIRE_APPROVAL,
+    evaluate_tool_policy,
+    format_policy_feedback,
+)
 from app.agent.reflection import (
     build_max_steps_reflection,
     build_tool_error_reflection,
@@ -156,40 +163,86 @@ def build_clean_tool_calls(tool_calls) -> list[dict[str, Any]]:
     return clean_tool_calls
 
 
+def parse_tool_arguments(
+    tool_call,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """解析模型生成的工具参数，并确保结果是 JSON 对象。"""
+    raw_arguments = tool_call.function.arguments or "{}"
+
+    try:
+        parsed = json.loads(raw_arguments)
+    except json.JSONDecodeError as error_value:
+        return None, {
+            "type": ERROR_TYPE_TOOL,
+            "message": "工具参数解析失败。",
+            "detail": str(error_value),
+        }
+
+    if not isinstance(parsed, dict):
+        return None, {
+            "type": ERROR_TYPE_TOOL,
+            "message": "工具参数必须是 JSON 对象。",
+            "detail": f"实际类型：{type(parsed).__name__}",
+        }
+
+    return parsed, None
+
+
+def build_invalid_argument_policy_decision(
+    *,
+    tool_name: str,
+    risk_level: str,
+    error: dict[str, Any],
+) -> dict[str, Any]:
+    """为非法 JSON 参数构建 Fail Closed 策略结果。"""
+    return {
+        "version": POLICY_GUARD_VERSION,
+        "decision": POLICY_BLOCK,
+        "allowed": False,
+        "requires_approval": False,
+        "tool_name": tool_name,
+        "risk_level": risk_level,
+        "planned": False,
+        "planned_tools": [],
+        "planned_target_paths": [],
+        "requested_paths": [],
+        "matched_paths": [],
+        "outside_paths": [],
+        "command": "",
+        "violations": [
+            {
+                "code": "invalid_tool_arguments",
+                "message": error.get("message", "工具参数无效。"),
+            }
+        ],
+        "reasons": [
+            "模型返回的工具参数无法安全解析，按 Fail Closed 拦截。"
+        ],
+    }
+
+
 def execute_tool(
     tool_call,
     available_tools: dict[str, Callable[..., Any]],
     agent_name: str = "Agent",
+    parsed_tool_args: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """
-    执行单个工具调用。
-
-    返回内容包括：
-    - tool_call_id
-    - tool_name
-    - tool_args
-    - tool_result
-    - success
-    - error
-    """
+    """执行已经通过 Policy Guard 的单个工具调用。"""
     tool_name = tool_call.function.name
-    tool_args_json = tool_call.function.arguments
+    tool_args = parsed_tool_args
 
-    try:
-        tool_args = json.loads(tool_args_json)
-    except json.JSONDecodeError as e:
-        return {
-            "tool_call_id": tool_call.id,
-            "tool_name": tool_name,
-            "tool_args": {},
-            "tool_result": "工具参数不是合法 JSON，未执行工具。",
-            "success": False,
-            "error": {
-                "type": ERROR_TYPE_TOOL,
-                "message": "工具参数解析失败。",
-                "detail": str(e),
+    if tool_args is None:
+        tool_args, argument_error = parse_tool_arguments(tool_call)
+
+        if argument_error:
+            return {
+                "tool_call_id": tool_call.id,
+                "tool_name": tool_name,
+                "tool_args": {},
+                "tool_result": "工具参数不是合法 JSON，未执行工具。",
+                "success": False,
+                "error": argument_error,
             }
-        }
 
     tool_func = available_tools.get(tool_name)
 
@@ -210,7 +263,6 @@ def execute_tool(
     try:
         raw_result = tool_func(**tool_args)
 
-        # 情况 1：工具返回结构化结果
         if isinstance(raw_result, dict) and "success" in raw_result:
             tool_result_text = str(raw_result.get("result", ""))
             tool_success = bool(raw_result.get("success"))
@@ -225,7 +277,6 @@ def execute_tool(
                 "error": tool_error,
             }
 
-        # 情况 2：旧工具仍然返回普通字符串
         tool_result_text = str(raw_result)
         legacy_error = infer_error_from_legacy_tool_result(tool_result_text)
 
@@ -238,19 +289,20 @@ def execute_tool(
             "error": legacy_error,
         }
 
-    except Exception as e:
+    except Exception as error_value:
         return {
             "tool_call_id": tool_call.id,
             "tool_name": tool_name,
             "tool_args": tool_args,
-            "tool_result": f"工具执行失败：{str(e)}",
+            "tool_result": f"工具执行失败：{str(error_value)}",
             "success": False,
             "error": {
                 "type": ERROR_TYPE_TOOL,
                 "message": "工具执行失败。",
-                "detail": str(e),
+                "detail": str(error_value),
             }
         }
+
 
 def _save_agent_run_compatible(
     *,
@@ -493,55 +545,96 @@ def run_agent_loop(
         for tool_call in assistant_message.tool_calls:
             tool_name = tool_call.function.name
             risk_level = get_tool_risk_level(tool_name)
+            tool_args, argument_error = parse_tool_arguments(tool_call)
 
-            if tool_requires_approval(tool_name):
-                try:
-                    tool_args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError as e:
-                    error = {
-                        "type": ERROR_TYPE_TOOL,
-                        "message": "工具参数解析失败，无法进入确认流程。",
-                        "detail": str(e),
-                    }
+            if argument_error:
+                policy_decision = build_invalid_argument_policy_decision(
+                    tool_name=tool_name,
+                    risk_level=risk_level,
+                    error=argument_error,
+                )
+                feedback = format_policy_feedback(policy_decision)
 
-                    step_counter += 1
+                step_counter += 1
+                steps.append({
+                    "step": step_counter,
+                    "model_round": step_index,
+                    "type": "policy_blocked",
+                    "tool_name": tool_name,
+                    "tool_args": {},
+                    "risk_level": risk_level,
+                    "tool_result": feedback,
+                    "content": "工具参数无效，执行前策略已拦截。",
+                    "success": False,
+                    "error": argument_error,
+                    "policy_decision": policy_decision,
+                    "started_at": now_iso(),
+                    "ended_at": now_iso(),
+                    "duration_ms": 0,
+                })
 
-                    steps.append({
-                        "step": step_counter,
-                        "model_round": step_index,
-                        "type": "approval_required",
-                        "tool_name": tool_name,
-                        "tool_args": {},
-                        "tool_result": "工具参数不是合法 JSON。",
-                        "success": False,
-                        "error": error,
-                        "started_at": now_iso(),
-                        "ended_at": now_iso(),
-                        "duration_ms": 0,
-                    })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": feedback,
+                })
+                continue
 
-                    return build_result_with_log(
-                        agent_name=agent_name,
-                        user_message=user_message,
-                        status=AGENT_STATUS_FAILED,
-                        answer="工具参数解析失败，任务已停止。",
-                        steps=steps,
-                        max_steps=max_steps,
-                        error=error,
-                        task_plan=task_plan,
-                    )
+            policy_decision = evaluate_tool_policy(
+                task_plan=task_plan,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                risk_level=risk_level,
+            )
 
+            if policy_decision["decision"] == POLICY_BLOCK:
+                feedback = format_policy_feedback(policy_decision)
+                error = {
+                    "type": "policy_violation",
+                    "message": "工具调用被 Execution Policy Guard 拦截。",
+                    "detail": feedback,
+                }
+
+                step_counter += 1
+                steps.append({
+                    "step": step_counter,
+                    "model_round": step_index,
+                    "type": "policy_blocked",
+                    "tool_name": tool_name,
+                    "tool_args": tool_args,
+                    "risk_level": risk_level,
+                    "tool_result": feedback,
+                    "content": "工具未执行，模型可以根据策略反馈重新规划。",
+                    "success": False,
+                    "error": error,
+                    "policy_decision": policy_decision,
+                    "started_at": now_iso(),
+                    "ended_at": now_iso(),
+                    "duration_ms": 0,
+                })
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": feedback,
+                })
+                continue
+
+            if policy_decision["decision"] == POLICY_REQUIRE_APPROVAL:
                 pending_action = save_pending_action(
                     agent_name=agent_name,
                     user_message=user_message,
                     tool_name=tool_name,
                     tool_args=tool_args,
                     risk_level=risk_level,
-                    reason=f"工具 {tool_name} 风险等级为 {risk_level}，需要用户确认后才能执行。",
+                    reason=(
+                        "Execution Policy Guard 已确认目标范围合法；"
+                        f"工具 {tool_name} 风险等级为 {risk_level}，"
+                        "仍需用户批准后才能执行。"
+                    ),
                 )
 
                 step_counter += 1
-
                 steps.append({
                     "step": step_counter,
                     "model_round": step_index,
@@ -549,10 +642,11 @@ def run_agent_loop(
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "risk_level": risk_level,
-                    "tool_result": "该工具需要用户确认，尚未执行。",
+                    "tool_result": "策略范围检查通过，但高风险工具尚未执行。",
                     "content": "等待用户确认后再执行高风险工具。",
                     "success": None,
                     "error": None,
+                    "policy_decision": policy_decision,
                     "started_at": now_iso(),
                     "ended_at": now_iso(),
                     "duration_ms": 0,
@@ -562,12 +656,17 @@ def run_agent_loop(
                     agent_name=agent_name,
                     user_message=user_message,
                     status=AGENT_STATUS_WAITING_APPROVAL,
-                    answer=f"{agent_name} 准备调用 {tool_name} 修改文件，需要用户确认后才能继续。",
+                    answer=(
+                        f"{agent_name} 准备调用 {tool_name}。"
+                        "目标范围检查已经通过，但该工具属于高风险写操作，"
+                        "需要用户确认后才能继续。"
+                    ),
                     steps=steps,
                     max_steps=max_steps,
                     pending_action=pending_action,
                     task_plan=task_plan,
                 )
+
             tool_started_at = now_iso()
             tool_start_time = time.perf_counter()
 
@@ -575,10 +674,10 @@ def run_agent_loop(
                 tool_call=tool_call,
                 available_tools=available_tools,
                 agent_name=agent_name,
+                parsed_tool_args=tool_args,
             )
 
             tool_ended_at = now_iso()
-
             executed_tool_name = tool_execution["tool_name"]
             executed_risk_level = get_tool_risk_level(executed_tool_name)
 
@@ -595,13 +694,12 @@ def run_agent_loop(
                 )
 
                 if should_retry_from_reflection(
-                        reflection=reflection,
-                        retry_count=reflection_retry_count,
-                        max_retries=max_reflection_retries,
+                    reflection=reflection,
+                    retry_count=reflection_retry_count,
+                    max_retries=max_reflection_retries,
                 ):
                     retry_from_reflection = True
                     reflection_retry_count += 1
-
                     tool_message_content = (
                         f"{tool_execution['tool_result']}\n\n"
                         "[失败自省]\n"
@@ -612,7 +710,6 @@ def run_agent_loop(
                     )
 
             step_counter += 1
-
             steps.append({
                 "step": step_counter,
                 "model_round": step_index,
@@ -625,6 +722,7 @@ def run_agent_loop(
                 "error": tool_execution["error"],
                 "reflection": reflection,
                 "retry_from_reflection": retry_from_reflection,
+                "policy_decision": policy_decision,
                 "started_at": tool_started_at,
                 "ended_at": tool_ended_at,
                 "duration_ms": duration_ms(tool_start_time),

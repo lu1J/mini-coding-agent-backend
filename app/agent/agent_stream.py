@@ -4,7 +4,12 @@ import time
 from datetime import datetime
 from typing import Any
 
-from app.agent.agent_loop import build_clean_tool_calls, execute_tool
+from app.agent.agent_loop import (
+    build_clean_tool_calls,
+    build_invalid_argument_policy_decision,
+    execute_tool,
+    parse_tool_arguments,
+)
 from app.agent.plan_execution_audit import (
     build_plan_execution_audit,
     persist_audit_to_run_log,
@@ -20,7 +25,13 @@ from app.agent.status import (
     ERROR_TYPE_MODEL,
     ERROR_TYPE_TOOL,
 )
-from app.agent.tool_policy import get_tool_risk_level, tool_requires_approval
+from app.agent.tool_policy import get_tool_risk_level
+from app.agent.execution_policy_guard import (
+    POLICY_BLOCK,
+    POLICY_REQUIRE_APPROVAL,
+    evaluate_tool_policy,
+    format_policy_feedback,
+)
 from app.llm.deepseek_client import llm
 from app.agent.code_agent import (
     CODE_AGENT_SYSTEM_PROMPT,
@@ -333,58 +344,113 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
         for tool_call in tool_calls:
             tool_name = tool_call.function.name
             risk_level = get_tool_risk_level(tool_name)
+            tool_args, argument_error = parse_tool_arguments(tool_call)
 
-            # 高风险工具：不直接执行，进入审批
-            if tool_requires_approval(tool_name):
-                approval_started_at = now_iso()
+            if argument_error:
+                policy_decision = build_invalid_argument_policy_decision(
+                    tool_name=tool_name,
+                    risk_level=risk_level,
+                    error=argument_error,
+                )
+                feedback = format_policy_feedback(policy_decision)
 
-                try:
-                    tool_args = json.loads(tool_call.function.arguments or "{}")
-                except json.JSONDecodeError as e:
-                    error = {
-                        "type": ERROR_TYPE_TOOL,
-                        "message": "工具参数不是合法 JSON。",
-                        "detail": str(e),
-                    }
+                step = {
+                    "step": step_index,
+                    "type": "policy_blocked",
+                    "tool_name": tool_name,
+                    "tool_args": {},
+                    "risk_level": risk_level,
+                    "tool_result": feedback,
+                    "content": "工具参数无效，执行前策略已拦截。",
+                    "success": False,
+                    "error": argument_error,
+                    "policy_decision": policy_decision,
+                    "started_at": now_iso(),
+                    "ended_at": now_iso(),
+                    "duration_ms": 0,
+                }
+                steps.append(step)
 
-                    step = {
+                yield sse_event(
+                    "policy_checked",
+                    {
                         "step": step_index,
-                        "type": "approval_required",
                         "tool_name": tool_name,
-                        "tool_args": None,
-                        "risk_level": risk_level,
-                        "tool_result": "工具参数解析失败，无法进入审批。",
-                        "success": False,
-                        "error": error,
-                        "started_at": approval_started_at,
-                        "ended_at": now_iso(),
-                        "duration_ms": 0,
-                    }
-                    steps.append(step)
+                        "policy_decision": policy_decision,
+                    },
+                )
+                yield sse_event("policy_blocked", {"step": step})
 
-                    terminal_data = build_stream_terminal_data(
-                        status=AGENT_STATUS_FAILED,
-                        user_message=user_message,
-                        answer="工具参数解析失败，任务已停止。",
-                        max_steps=max_steps,
-                        steps=steps,
-                        task_plan=task_plan,
-                        error=error,
-                    )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": feedback,
+                })
+                continue
 
-                    yield sse_event(
-                        "agent_failed",
-                        terminal_data,
-                    )
-                    return
+            policy_decision = evaluate_tool_policy(
+                task_plan=task_plan,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                risk_level=risk_level,
+            )
 
+            yield sse_event(
+                "policy_checked",
+                {
+                    "step": step_index,
+                    "tool_name": tool_name,
+                    "risk_level": risk_level,
+                    "policy_decision": policy_decision,
+                },
+            )
+
+            if policy_decision["decision"] == POLICY_BLOCK:
+                feedback = format_policy_feedback(policy_decision)
+                error = {
+                    "type": "policy_violation",
+                    "message": "工具调用被 Execution Policy Guard 拦截。",
+                    "detail": feedback,
+                }
+                step = {
+                    "step": step_index,
+                    "type": "policy_blocked",
+                    "tool_name": tool_name,
+                    "tool_args": tool_args,
+                    "risk_level": risk_level,
+                    "tool_result": feedback,
+                    "content": "工具未执行，模型可以根据策略反馈重新规划。",
+                    "success": False,
+                    "error": error,
+                    "policy_decision": policy_decision,
+                    "started_at": now_iso(),
+                    "ended_at": now_iso(),
+                    "duration_ms": 0,
+                }
+                steps.append(step)
+
+                yield sse_event("policy_blocked", {"step": step})
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": feedback,
+                })
+                continue
+
+            if policy_decision["decision"] == POLICY_REQUIRE_APPROVAL:
+                approval_started_at = now_iso()
                 pending_action = save_pending_action(
                     agent_name="CodeAgentStream",
                     user_message=user_message,
                     tool_name=tool_name,
                     tool_args=tool_args,
                     risk_level=risk_level,
-                    reason=f"工具 {tool_name} 风险等级为 {risk_level}，需要用户确认后才能执行。",
+                    reason=(
+                        "Execution Policy Guard 已确认目标范围合法；"
+                        f"工具 {tool_name} 风险等级为 {risk_level}，"
+                        "仍需用户批准后才能执行。"
+                    ),
                 )
 
                 step = {
@@ -393,18 +459,22 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "risk_level": risk_level,
-                    "tool_result": "该工具需要用户确认，尚未执行。",
+                    "tool_result": "策略范围检查通过，但高风险工具尚未执行。",
                     "content": "等待用户确认后再执行高风险工具。",
                     "success": None,
                     "error": None,
+                    "policy_decision": policy_decision,
                     "started_at": approval_started_at,
                     "ended_at": now_iso(),
                     "duration_ms": 0,
                 }
                 steps.append(step)
 
-                answer = f"CodeAgentStream 准备调用 {tool_name}，需要用户确认后才能继续。"
-
+                answer = (
+                    f"CodeAgentStream 准备调用 {tool_name}。"
+                    "目标范围检查已经通过，但该工具属于高风险写操作，"
+                    "需要用户确认后才能继续。"
+                )
                 terminal_data = build_stream_terminal_data(
                     status=AGENT_STATUS_WAITING_APPROVAL,
                     user_message=user_message,
@@ -417,13 +487,9 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
                 )
                 terminal_data["step"] = step
 
-                yield sse_event(
-                    "approval_required",
-                    terminal_data,
-                )
+                yield sse_event("approval_required", terminal_data)
                 return
 
-            # 低风险 / 中风险工具：直接执行
             tool_started_at = now_iso()
             tool_start_time = time.perf_counter()
 
@@ -433,6 +499,7 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
                     "step": step_index,
                     "tool_name": tool_name,
                     "risk_level": risk_level,
+                    "policy_decision": policy_decision,
                     "message": f"开始执行工具：{tool_name}",
                     "started_at": tool_started_at,
                 },
@@ -440,11 +507,10 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
 
             tool_execution = execute_tool(
                 tool_call=tool_call,
-                available_tools=(
-                    AVAILABLE_CODE_AGENT_TOOLS
-                ),
+                available_tools=AVAILABLE_CODE_AGENT_TOOLS,
+                agent_name="CodeAgentStream",
+                parsed_tool_args=tool_args,
             )
-
             tool_ended_at = now_iso()
 
             step = {
@@ -456,26 +522,20 @@ def run_code_agent_stream(user_message: str, max_steps: int = 8):
                 "tool_result": tool_execution["tool_result"],
                 "success": tool_execution["success"],
                 "error": tool_execution["error"],
+                "policy_decision": policy_decision,
                 "started_at": tool_started_at,
                 "ended_at": tool_ended_at,
                 "duration_ms": duration_ms(tool_start_time),
             }
             steps.append(step)
 
-            yield sse_event(
-                "tool_call_finished",
-                {
-                    "step": step,
-                },
-            )
+            yield sse_event("tool_call_finished", {"step": step})
 
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_execution["tool_call_id"],
-                    "content": tool_execution["tool_result"],
-                }
-            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_execution["tool_call_id"],
+                "content": tool_execution["tool_result"],
+            })
 
     # 达到最大步数
     answer = "CodeAgentStream 达到最大执行步数，已停止。请简化任务或增加 max_steps。"

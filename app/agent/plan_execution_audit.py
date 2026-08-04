@@ -390,6 +390,55 @@ def calculate_execution_outcome(
     }
 
 
+def calculate_policy_guard_outcome(
+    execution_steps: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """汇总执行前 Policy Guard 的决策结果。"""
+    steps = execution_steps or []
+    decisions: list[dict[str, Any]] = []
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+
+        policy_decision = step.get("policy_decision")
+
+        if not isinstance(policy_decision, dict):
+            continue
+
+        decisions.append(
+            {
+                "step": step.get("step"),
+                "tool_name": step.get("tool_name"),
+                "step_type": step.get("type"),
+                "decision": policy_decision.get("decision"),
+                "risk_level": policy_decision.get("risk_level"),
+                "planned": policy_decision.get("planned"),
+                "requested_paths": policy_decision.get("requested_paths", []),
+                "outside_paths": policy_decision.get("outside_paths", []),
+                "violations": policy_decision.get("violations", []),
+            }
+        )
+
+    decision_counts = dict(
+        Counter(
+            str(item.get("decision") or "unknown")
+            for item in decisions
+        )
+    )
+
+    return {
+        "version": "1.0",
+        "checked_count": len(decisions),
+        "blocked_count": decision_counts.get("block", 0),
+        "approval_count": decision_counts.get("require_approval", 0),
+        "allow_with_audit_count": decision_counts.get("allow_with_audit", 0),
+        "allow_count": decision_counts.get("allow", 0),
+        "decision_counts": decision_counts,
+        "decisions": decisions,
+    }
+
+
 def determine_audit_status(
     *,
     executed_tools: list[str],
@@ -554,6 +603,9 @@ def build_plan_execution_audit(
         execution_steps=execution_steps,
         planned_tools=planned_tools,
     )
+    policy_guard = calculate_policy_guard_outcome(
+        execution_steps
+    )
 
     status = determine_audit_status(
         executed_tools=executed_tools,
@@ -568,7 +620,9 @@ def build_plan_execution_audit(
     # - 未计划命令执行；
     # - 无法确认目标的写工具；
     # 都必须升级为 requires_review。
-    if parameter_audit["requires_review"]:
+    if policy_guard["blocked_count"]:
+        status = AUDIT_STATUS_REVIEW
+    elif parameter_audit["requires_review"]:
         status = AUDIT_STATUS_REVIEW
     elif (
         status == AUDIT_STATUS_ALIGNED
@@ -582,6 +636,12 @@ def build_plan_execution_audit(
         risk=risk,
     )
     deviation_notes.extend(parameter_audit["notes"])
+
+    if policy_guard["blocked_count"]:
+        deviation_notes.append(
+            "Execution Policy Guard 在工具执行前拦截了 "
+            f"{policy_guard['blocked_count']} 次违规调用。"
+        )
 
     summary = build_audit_summary(
         status=status,
@@ -606,12 +666,17 @@ def build_plan_execution_audit(
         "risk": risk,
         "outcome": outcome,
         "parameter_audit": parameter_audit,
+        "policy_guard": policy_guard,
         "deviation_notes": deviation_notes,
         "summary": (
             summary
             + " 参数审计状态为 "
             + parameter_audit["status"]
-            + "。"
+            + "；策略前置检查 "
+            + str(policy_guard["checked_count"])
+            + " 次，拦截 "
+            + str(policy_guard["blocked_count"])
+            + " 次。"
         ),
     }
 

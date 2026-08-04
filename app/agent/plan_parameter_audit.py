@@ -20,6 +20,9 @@ WRITE_TOOL_NAMES = {
     "apply_patch",
     "move_file",
     "rename_file",
+    "ensure_gitignore",
+    "restore_file",
+    "apply_workspace_patch",
 }
 
 COMMAND_TOOL_NAMES = {
