@@ -8,8 +8,7 @@ from app.agent.tool_runner import run_time_tool_agent
 from app.agent.hello_agent import run_hello_agent
 from app.agent.code_agent import run_code_agent
 from app.agent.run_logger import list_agent_runs, read_agent_run
-from app.agent.approval_store import read_pending_action, delete_pending_action
-from app.tools.file_tools import AVAILABLE_FILE_TOOLS
+from app.agent.verified_approval import execute_verified_approval
 from app.agent.agent_stream import run_code_agent_stream
 from openai import APIConnectionError, APIError, APIStatusError
 from app.memory.context_manager import build_context_window
@@ -557,134 +556,34 @@ def get_agent_run_detail(run_id: str):
 @app.post(
     "/agent/approvals/{approval_id}/execute",
     response_model=ApprovalExecuteResponse,
+    response_model_exclude_none=True,
 )
 def execute_approval(
     approval_id: str,
     req: ApprovalExecuteRequest,
 ):
     """
-    执行或拒绝一个等待确认的工具动作。
+    执行或拒绝等待确认的写操作。
 
-    审批通过后执行工具，并尝试继续运行 CodeAgent。
+    Day 13 流程：
+    二次策略检查 → 修改前快照 → 执行写工具 →
+    Diff/语法/格式/定向测试验证 → 失败自动回滚 → 成功后续跑。
     """
     try:
-        pending_action = read_pending_action(approval_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        result = execute_verified_approval(
+            approval_id=approval_id,
+            approved=req.approved,
+        )
+    except ValueError as error_value:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error_value),
+        ) from error_value
 
-    if not pending_action:
+    if result.get("status") == "not_found":
         raise HTTPException(
             status_code=404,
-            detail="待确认动作不存在或已处理",
+            detail="待确认动作不存在或已经处理。",
         )
 
-    risk_level = pending_action.get("risk_level", "high")
-
-    if not req.approved:
-        delete_pending_action(approval_id)
-
-        return {
-            "status": "rejected",
-            "message": "用户拒绝执行该动作，待确认动作已删除。",
-            "approval_id": approval_id,
-            "tool_name": pending_action.get("tool_name"),
-            "tool_args": pending_action.get("tool_args"),
-            "risk_level": risk_level,
-            "tool_result": None,
-            "success": False,
-            "error": None,
-        }
-
-    tool_name = pending_action.get("tool_name")
-    tool_args = pending_action.get("tool_args") or {}
-
-    tool_func = AVAILABLE_FILE_TOOLS.get(tool_name)
-
-    if not tool_func:
-        return {
-            "status": "failed",
-            "message": f"工具不存在：{tool_name}",
-            "approval_id": approval_id,
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "risk_level": risk_level,
-            "tool_result": None,
-            "success": False,
-            "error": {
-                "type": "tool_error",
-                "message": f"工具不存在：{tool_name}",
-                "detail": None,
-            },
-        }
-
-    try:
-        tool_result = tool_func(**tool_args)
-        delete_pending_action(approval_id)
-
-        # 审批通过并执行工具后，重新构造一个续跑任务，让 CodeAgent 继续完成原始任务
-        resume_result = None
-
-        try:
-            from app.agent.code_agent import run_code_agent
-
-            original_user_message = pending_action.get("user_message", "")
-
-            resume_message = (
-                "下面是一个已经经过用户确认并执行完成的高风险工具动作。\n\n"
-                f"用户原始任务：\n{original_user_message}\n\n"
-                f"已执行工具：{tool_name}\n\n"
-                f"工具参数：\n{tool_args}\n\n"
-                f"工具执行结果：\n{str(tool_result)}\n\n"
-                "请基于以上结果继续完成用户原始任务。\n"
-                "不要重复调用已经执行过的写入工具。\n"
-                "如果需要审查改动，可以调用 get_git_status、get_git_diff。\n"
-                "如果需要检查 Python 语法，可以调用 run_command。\n"
-                "最后请总结：已执行了什么、结果是否成功、当前还需要用户注意什么。"
-            )
-
-            resume_result = run_code_agent(
-                user_message=resume_message,
-                max_steps=5,
-            )
-
-        except Exception as e:
-            resume_result = {
-                "status": "failed",
-                "answer": "审批动作已执行，但后续 Agent Resume 失败。",
-                "steps": [],
-                "error": {
-                    "type": "resume_error",
-                    "message": "审批后续跑失败。",
-                    "detail": str(e),
-                }
-            }
-
-        return {
-            "status": "approved",
-            "message": "用户已确认，工具已执行，并已尝试继续运行 Agent。",
-            "approval_id": approval_id,
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "risk_level": risk_level,
-            "tool_result": str(tool_result),
-            "success": True,
-            "error": None,
-            "resume_result": resume_result,
-        }
-
-    except Exception as e:
-        return {
-            "status": "failed",
-            "message": "工具执行失败。",
-            "approval_id": approval_id,
-            "tool_name": tool_name,
-            "tool_args": tool_args,
-            "risk_level": risk_level,
-            "tool_result": None,
-            "success": False,
-            "error": {
-                "type": "tool_error",
-                "message": "工具执行失败。",
-                "detail": str(e),
-            },
-        }
+    return result

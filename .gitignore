@@ -1,4 +1,4 @@
-# Environment
+﻿# Environment
 .env
 .venv/
 venv/
@@ -44,4 +44,6 @@ workspace/**/.git/
 eval_result.json
 
 # Local API test payloads
-body_stream.json
+body_stream.jsonworkspace/
+*.day14_backup
+/workspace/

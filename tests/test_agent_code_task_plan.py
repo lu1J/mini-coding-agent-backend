@@ -25,6 +25,39 @@ def test_agent_code_response_contains_task_plan(monkeypatch):
         tool_calls=None,
     )
 
+    real_build_task_plan = agent_loop.build_task_plan
+
+    def fake_build_task_plan(user_message: str):
+        plan = real_build_task_plan(user_message)
+
+        # 这个测试只验证 HTTP 响应是否包含 task_plan，
+        # 不负责测试 Planner–Executor 是否执行完整工具链。
+        # 因此把运行步骤替换成一个最终总结步骤，
+        # 允许模型测试桩直接返回最终回答。
+        plan["steps"] = [
+            {
+                "index": 1,
+                "title": "返回测试回答",
+                "description": (
+                    "该测试只验证 HTTP 响应会暴露 Task Plan。"
+                ),
+                "suggested_tool": None,
+                "risk_level": "low",
+                "reason": (
+                    "避免测试桩在 Planner–Executor 下提前结束。"
+                ),
+            }
+        ]
+        plan["estimated_steps"] = 1
+
+        return plan
+
+    monkeypatch.setattr(
+        agent_loop,
+        "build_task_plan",
+        fake_build_task_plan,
+    )
+
     def fake_create(*args, **kwargs):
         return make_fake_response(final_message)
 

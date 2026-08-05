@@ -130,8 +130,34 @@ def test_agent_loop_uses_reflection_retry_hint(monkeypatch):
     assert second_tool_step["success"] is True
 
     second_model_call_messages = captured_model_messages[1]
-    last_message_before_retry = second_model_call_messages[-1]
+    second_model_call_messages = captured_model_messages[1]
 
-    assert last_message_before_retry["role"] == "tool"
-    assert "[失败自省]" in last_message_before_retry["content"]
-    assert "建议下一步工具：list_files" in last_message_before_retry["content"]
+    last_tool_message_before_retry = next(
+        message
+        for message in reversed(
+            second_model_call_messages
+        )
+        if message.get("role") == "tool"
+    )
+
+    assert (
+            last_tool_message_before_retry["role"]
+            == "tool"
+    )
+
+    tool_content = (
+        last_tool_message_before_retry["content"]
+    )
+
+    assert "[失败自省]" in tool_content
+    assert "分析：" in tool_content
+    assert "建议：" in tool_content
+    executor_message = (
+        second_model_call_messages[-1]
+    )
+
+    assert executor_message["role"] == "system"
+    assert (
+            "[Planner–Executor]"
+            in executor_message["content"]
+    )

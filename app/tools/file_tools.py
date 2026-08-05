@@ -3,6 +3,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from app.tools.command_runtime import (
+    format_runtime_command,
+    resolve_runtime_command_parts,
+)
+
 
 # Agent 只能访问这个 workspace 目录
 WORKSPACE_ROOT = Path("workspace").resolve()
@@ -114,7 +119,7 @@ def should_ignore_path(path: Path) -> bool:
     return False
 
 
-def list_files(path: str = ".") -> str:
+def list_files(path: str = ".", max_entries: int = 50) -> str:
     """
     列出 workspace 中指定目录下的文件和文件夹。
     """
@@ -126,18 +131,28 @@ def list_files(path: str = ".") -> str:
     if not target_path.is_dir():
         return f"这不是一个目录：{path}"
 
+    max_entries = max(1, min(int(max_entries), 200))
+    visible_items = [
+        item
+        for item in sorted(target_path.iterdir())
+        if not should_ignore_path(item)
+    ]
+    total_entries = len(visible_items)
     results = []
 
-    for item in sorted(target_path.iterdir()):
-        if should_ignore_path(item):
-            continue
-
+    for item in visible_items[:max_entries]:
         item_type = "目录" if item.is_dir() else "文件"
         relative_path = item.relative_to(WORKSPACE_ROOT)
         results.append(f"[{item_type}] {relative_path}")
 
     if not results:
         return f"目录为空：{path}"
+
+    if total_entries > max_entries:
+        results.append(
+            "[结果已截断] "
+            f"目录共有 {total_entries} 项，本次只显示前 {max_entries} 项。"
+        )
 
     return "\n".join(results)
 
@@ -626,9 +641,13 @@ def run_command(command: str, cwd: str = ".") -> dict[str, Any]:
             result=f"工作目录不是目录：{cwd}",
         )
 
+    execution_parts = resolve_runtime_command_parts(
+        command_parts
+    )
+
     try:
         completed = subprocess.run(
-            command_parts,
+            execution_parts,
             cwd=target_cwd,
             capture_output=True,
             text=True,
@@ -640,7 +659,7 @@ def run_command(command: str, cwd: str = ".") -> dict[str, Any]:
             error_type="command_failed",
             message="命令程序不存在。",
             detail=str(e),
-            result=f"命令程序不存在，无法执行：{command_parts[0]}",
+            result=f"命令程序不存在，无法执行：{execution_parts[0]}",
         )
     except subprocess.TimeoutExpired:
         return make_tool_error(
@@ -661,7 +680,8 @@ def run_command(command: str, cwd: str = ".") -> dict[str, Any]:
     stderr = completed.stderr.strip()
 
     result_text = (
-        f"命令：{command}\n"
+        f"请求命令：{command}\n"
+        f"实际命令：{format_runtime_command(execution_parts)}\n"
         f"工作目录：{cwd}\n"
         f"退出码 returncode：{completed.returncode}\n\n"
         f"标准输出 stdout：\n{stdout if stdout else '[无]'}\n\n"

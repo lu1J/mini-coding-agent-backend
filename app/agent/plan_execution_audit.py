@@ -9,13 +9,30 @@ from app.agent.plan_parameter_audit import build_parameter_audit
 from app.agent.tool_policy import get_tool_risk_level
 
 
-AUDIT_VERSION = "2.0"
+AUDIT_VERSION = "2.1"
 
 AUDIT_STATUS_ALIGNED = "aligned"
 AUDIT_STATUS_PARTIAL = "partially_aligned"
 AUDIT_STATUS_DIVERGED = "diverged"
 AUDIT_STATUS_REVIEW = "requires_review"
 AUDIT_STATUS_NOT_EXECUTED = "not_executed"
+
+
+TOOL_CANONICAL_NAMES = {
+    "read_file_lines": "read_file",
+    "get_file_diff": "get_workspace_diff",
+    "get_git_diff": "get_workspace_diff",
+    "search_python_symbol": "search_code",
+}
+
+
+def canonical_tool_name(tool_name: str) -> str:
+    normalized = str(tool_name or "").strip()
+    return TOOL_CANONICAL_NAMES.get(normalized, normalized)
+
+
+def canonicalize_tool_sequence(tools: list[str]) -> list[str]:
+    return [canonical_tool_name(tool_name) for tool_name in tools]
 
 
 RISK_LEVEL_ORDER = {
@@ -568,28 +585,33 @@ def build_plan_execution_audit(
     planned_unique = deduplicate_keep_order(planned_tools)
     executed_unique = deduplicate_keep_order(executed_tools)
 
-    planned_set = set(planned_unique)
-    executed_set = set(executed_unique)
+    canonical_planned = canonicalize_tool_sequence(planned_tools)
+    canonical_executed = canonicalize_tool_sequence(executed_tools)
+    canonical_planned_unique = deduplicate_keep_order(canonical_planned)
+    canonical_executed_unique = deduplicate_keep_order(canonical_executed)
+
+    canonical_planned_set = set(canonical_planned_unique)
+    canonical_executed_set = set(canonical_executed_unique)
 
     matched_tools = [
         tool_name
         for tool_name in planned_unique
-        if tool_name in executed_set
+        if canonical_tool_name(tool_name) in canonical_executed_set
     ]
     unused_planned_tools = [
         tool_name
         for tool_name in planned_unique
-        if tool_name not in executed_set
+        if canonical_tool_name(tool_name) not in canonical_executed_set
     ]
     unplanned_tools = [
         tool_name
         for tool_name in executed_unique
-        if tool_name not in planned_set
+        if canonical_tool_name(tool_name) not in canonical_planned_set
     ]
 
     metrics = calculate_alignment_metrics(
-        planned_tools=planned_tools,
-        executed_tools=executed_tools,
+        planned_tools=canonical_planned,
+        executed_tools=canonical_executed,
     )
     risk = calculate_risk_audit(
         task_plan=task_plan,
@@ -658,6 +680,9 @@ def build_plan_execution_audit(
         "planned_tools": planned_unique,
         "executed_tools": executed_tools,
         "executed_unique_tools": executed_unique,
+        "normalized_planned_tools": canonical_planned_unique,
+        "normalized_executed_tools": canonical_executed_unique,
+        "tool_equivalences": TOOL_CANONICAL_NAMES,
         "matched_tools": matched_tools,
         "unused_planned_tools": unused_planned_tools,
         "unplanned_tools": unplanned_tools,
@@ -685,10 +710,38 @@ def attach_plan_execution_audit(
     result: dict[str, Any],
 ) -> dict[str, Any]:
     """给 Agent 最终结果附加计划—执行审计。"""
-    result["plan_execution_audit"] = build_plan_execution_audit(
+    audit = build_plan_execution_audit(
         task_plan=result.get("task_plan"),
         execution_steps=result.get("steps", []),
     )
+
+    executor_state = result.get("executor_state")
+    if isinstance(executor_state, dict):
+        completion_status = str(
+            executor_state.get("completion_status") or ""
+        )
+        executor_completion = {
+            "status": executor_state.get("status"),
+            "completion_status": completion_status,
+            "completed_steps": executor_state.get("completed_steps", 0),
+            "warning_steps": executor_state.get("warning_steps", 0),
+            "blocked_calls": executor_state.get("blocked_calls", 0),
+        }
+        audit["executor_completion"] = executor_completion
+
+        if completion_status == "completed_with_warnings":
+            if audit.get("status") == AUDIT_STATUS_ALIGNED:
+                audit["status"] = AUDIT_STATUS_PARTIAL
+            audit.setdefault("deviation_notes", []).append(
+                "执行顺序与范围总体符合计划，但至少一个步骤仅完成了降级验证，"
+                "最终结果带有警告。"
+            )
+            audit["summary"] = (
+                str(audit.get("summary") or "")
+                + " Executor 最终状态为 completed_with_warnings。"
+            )
+
+    result["plan_execution_audit"] = audit
     return result
 
 

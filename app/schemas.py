@@ -74,6 +74,10 @@ class PendingAction(BaseModel):
     status: str = Field(default="pending", description="待确认动作状态")
     created_at: str = Field(default="", description="创建时间")
     pending_path: str | None = Field(default=None, description="待确认动作保存路径")
+    executor_context_path: str | None = Field(
+        default=None,
+        description="等待审批时保存的 Planner–Executor 上下文路径",
+    )
 
 
 class AgentStep(BaseModel):
@@ -100,6 +104,18 @@ class AgentStep(BaseModel):
         default=None,
         description="工具执行前的策略检查结果",
     )
+    executor_decision: dict[str, Any] | None = Field(
+        default=None,
+        description="Planner–Executor 对当前工具和计划步骤的匹配决策",
+    )
+    plan_step_index: int | None = Field(
+        default=None,
+        description="该执行事件对应的 Planner 步骤编号",
+    )
+    plan_step_title: str | None = Field(
+        default=None,
+        description="该执行事件对应的 Planner 步骤标题",
+    )
     started_at: str | None = Field(default=None, description="步骤开始时间")
     ended_at: str | None = Field(default=None, description="步骤结束时间")
     duration_ms: int | None = Field(default=None, description="步骤耗时，单位毫秒")
@@ -112,6 +128,10 @@ class AgentResponse(BaseModel):
     status: str = Field(..., description="执行状态，例如 finished、failed、max_steps_reached")
     answer: str = Field(..., description="Agent 最终回答")
     task_plan: dict[str, Any] | None = Field(default=None, description="执行前任务规划结果")
+    executor_state: dict[str, Any] | None = Field(
+        default=None,
+        description="Planner–Executor 当前步骤、完成状态和受控执行信息",
+    )
     steps: list[AgentStep] = Field(default_factory=list, description="Agent 执行轨迹")
 
     plan_execution_audit: dict[str, Any] | None = Field(
@@ -189,6 +209,10 @@ class AgentRunDetail(BaseModel):
     answer: str = Field(default="", description="最终回答")
     max_steps: int = Field(default=0, description="最大执行步数")
     steps: list[AgentStep] = Field(default_factory=list, description="完整执行轨迹")
+    executor_state: dict[str, Any] | None = Field(
+        default=None,
+        description="Planner–Executor 最终状态",
+    )
     created_at: str = Field(default="", description="创建时间")
     log_path: str | None = Field(default=None, description="日志路径")
 
@@ -218,9 +242,14 @@ class ApprovalExecuteResponse(BaseModel):
     success: bool | None = Field(default=None, description="工具是否执行成功")
     error: AgentError | None = Field(default=None, description="错误信息")
 
+    verification_report: dict[str, Any] | None = Field(
+        default=None,
+        description="审批写操作的自动验证、Diff 与回滚报告",
+    )
+
     resume_result: dict[str, Any] | None = Field(
         default=None,
-        description="审批执行后继续运行 Agent 的结果"
+        description="审批执行并验证成功后继续运行 Agent 的结果"
     )
 
 
