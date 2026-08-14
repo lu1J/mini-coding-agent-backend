@@ -57,6 +57,12 @@ from app.schemas import (
     ConversationRefreshSummaryResponse,
 )
 
+from app.agent.langgraph_service import (
+    get_code_agent_graph_state,
+    resume_code_agent_graph,
+    run_code_agent_graph,
+)
+
 app = FastAPI(title="Mini Agent Backend")
 
 
@@ -68,6 +74,51 @@ MEMORY_CHAT_SYSTEM_PROMPT = """
 不要编造历史中没有出现过的事实。
 如果上下文不足，请直接说明需要更多信息。
 """.strip()
+
+
+@app.post("/agent/code/graph")
+def agent_code_graph(req: AgentRequest):
+    """
+    LangGraph Shadow Mode。
+
+    暂时与旧 /agent/code 并行运行，
+    验证稳定后再考虑切换默认入口。
+    """
+    return run_code_agent_graph(
+        user_message=req.message,
+        max_steps=req.max_steps,
+    )
+
+
+@app.post(
+    "/agent/code/graph/{thread_id}/resume"
+)
+def agent_code_graph_resume(
+    thread_id: str,
+    req: ApprovalExecuteRequest,
+):
+    """
+    使用相同 thread_id
+    恢复 LangGraph HITL interrupt。
+    """
+    return resume_code_agent_graph(
+        thread_id=thread_id,
+        approved=req.approved,
+    )
+
+
+@app.get(
+    "/agent/code/graph/{thread_id}/state"
+)
+def agent_code_graph_state(
+    thread_id: str,
+):
+    """
+    查看当前 LangGraph checkpoint。
+    """
+    return get_code_agent_graph_state(
+        thread_id=thread_id,
+    )
 
 
 @app.get("/health")

@@ -68,3 +68,34 @@ def test_advisory_after_adding_comment_is_not_edit_or_test():
     assert TASK_INTENT_TEST not in plan["intents"]
     assert "edit_file" not in plan["suggested_tools"]
     assert "run_command" not in plan["suggested_tools"]
+
+
+def test_position_based_add_comment_is_edit_and_test():
+    plan = build_task_plan(
+        "请在 demo_project/models.py 文件末尾"
+        "新增注释 # LangGraph migration test，"
+        "并运行测试。"
+    )
+
+    assert "edit" in plan["intents"]
+    assert "test" in plan["intents"]
+
+    assert (
+        "demo_project/models.py"
+        in plan["target_paths"]
+    )
+
+    assert "edit_file" in plan["suggested_tools"]
+    assert "run_command" in plan["suggested_tools"]
+
+    assert plan["risk_level"] == "high"
+    assert plan["needs_approval"] is True
+
+
+def test_analysis_of_position_based_edit_is_not_edit():
+    plan = build_task_plan(
+        "请分析在 demo_project/models.py "
+        "文件末尾新增注释后会有什么影响。"
+    )
+
+    assert "edit" not in plan["intents"]
