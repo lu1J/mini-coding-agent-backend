@@ -63,6 +63,12 @@ from app.agent.langgraph_service import (
     run_code_agent_graph,
 )
 
+from app.agent.langgraph_v2_service import (
+    get_fine_grained_graph_state,
+    resume_fine_grained_graph,
+    run_fine_grained_graph,
+)
+
 app = FastAPI(title="Mini Agent Backend")
 
 
@@ -117,6 +123,54 @@ def agent_code_graph_state(
     查看当前 LangGraph checkpoint。
     """
     return get_code_agent_graph_state(
+        thread_id=thread_id,
+    )
+
+
+@app.post("/agent/code/graph/v2")
+def agent_code_graph_v2(req: AgentRequest):
+    """
+    LangGraph v2 细粒度编排（Shadow Mode）。
+
+    与 v1 并行运行，验证稳定后再考虑切换默认入口。
+    区别于 v1：
+    - 不再把 run_agent_loop() 整体包进 execute 节点；
+    - Model / Executor / Policy / Tool / Reflection / Approval 由独立 Node / Edge 控制；
+    - 使用独立 SQLite Checkpointer，不污染 v1 checkpoint。
+    """
+    return run_fine_grained_graph(
+        user_message=req.message,
+        max_steps=req.max_steps,
+    )
+
+
+@app.post(
+    "/agent/code/graph/v2/{thread_id}/resume"
+)
+def agent_code_graph_v2_resume(
+    thread_id: str,
+    req: ApprovalExecuteRequest,
+):
+    """
+    使用相同 thread_id
+    恢复 LangGraph v2 HITL interrupt。
+    """
+    return resume_fine_grained_graph(
+        thread_id=thread_id,
+        approved=req.approved,
+    )
+
+
+@app.get(
+    "/agent/code/graph/v2/{thread_id}/state"
+)
+def agent_code_graph_v2_state(
+    thread_id: str,
+):
+    """
+    查看 LangGraph v2 checkpoint。
+    """
+    return get_fine_grained_graph_state(
         thread_id=thread_id,
     )
 
