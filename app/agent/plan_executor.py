@@ -64,6 +64,38 @@ SUPPORTING_LOW_RISK_TOOLS = {
     "get_workspace_diff",
 }
 
+# 扩展 supporting 注册表（默认空）。
+# MCP 只读演示等外部低风险工具必须显式注册后，
+# 才能以“每计划步骤至多一次”的 supporting 身份被 Executor 放行。
+# 不注册任何工具时，评估逻辑与引入该机制前完全一致。
+_EXTRA_SUPPORTING_LOW_RISK_TOOLS: set[str] = set()
+
+
+def register_extra_supporting_low_risk_tools(
+    *tool_names: str,
+) -> frozenset[str]:
+    """注册扩展低风险 supporting 工具（幂等），返回当前注册快照。"""
+    for tool_name in tool_names:
+        if isinstance(tool_name, str) and tool_name.strip():
+            _EXTRA_SUPPORTING_LOW_RISK_TOOLS.add(tool_name.strip())
+    return frozenset(_EXTRA_SUPPORTING_LOW_RISK_TOOLS)
+
+
+def unregister_extra_supporting_low_risk_tools(
+    *tool_names: str,
+) -> frozenset[str]:
+    """注销扩展 supporting 工具（幂等），返回当前注册快照。"""
+    for tool_name in tool_names:
+        _EXTRA_SUPPORTING_LOW_RISK_TOOLS.discard(tool_name)
+    return frozenset(_EXTRA_SUPPORTING_LOW_RISK_TOOLS)
+
+
+def _is_supporting_low_risk_tool(tool_name: str) -> bool:
+    return (
+        tool_name in SUPPORTING_LOW_RISK_TOOLS
+        or tool_name in _EXTRA_SUPPORTING_LOW_RISK_TOOLS
+    )
+
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -287,7 +319,7 @@ def evaluate_executor_tool_call(
     supporting_used = int(current.get("supporting_calls_used") or 0)
     if (
         risk_level == "low"
-        and tool_name in SUPPORTING_LOW_RISK_TOOLS
+        and _is_supporting_low_risk_tool(tool_name)
         and supporting_used < 1
     ):
         normalized_args = tool_args or {}
