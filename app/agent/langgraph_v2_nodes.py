@@ -17,6 +17,7 @@ from app.agent.agent_loop import (
     parse_tool_arguments,
 )
 from app.agent.approval_store import create_approval_id
+from app.agent.context_builder import build_model_request_messages
 from app.agent.change_verifier import execute_verified_change
 from app.agent.execution_policy_guard import (
     POLICY_BLOCK,
@@ -67,6 +68,9 @@ from app.agent.verified_approval import (
     _should_run_tests,
 )
 from app.llm.deepseek_client import llm
+
+# Day17：模型上下文预算（只用于统计与 over_budget 判断，不真正删除历史）。
+CONTEXT_MAX_TOKENS_BUDGET = 16000
 
 
 def _tool_call_object(entry: dict[str, Any]) -> SimpleNamespace:
@@ -201,14 +205,25 @@ def create_langgraph_v2_nodes(
         # Tool Call Batch Barrier：能走到这里说明 cursor >= len(pending)，
         # 本 batch 所有 tool_call_id 都已有 role=tool 响应；deferred feedback
         # （失败自省 / 审批后恢复上下文）此时注入请求，位置合法。
+        # Day17：消息拼装交由 Context Builder 统一负责——顺序保持
+        # system → user → message_log → deferred → instruction，
+        # 并对超长 role=tool 结果做“请求侧压缩”（State 原文不落盘压缩）。
         deferred_feedback = list(state.get("deferred_feedback") or [])
-        request_messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-            *message_log,
-            *deferred_feedback,
-            {"role": "system", "content": build_executor_instruction(executor_state)},
-        ]
+        context = build_model_request_messages(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            message_log=message_log,
+            deferred_feedback=deferred_feedback,
+            executor_instruction=build_executor_instruction(executor_state),
+            max_context_tokens=CONTEXT_MAX_TOKENS_BUDGET,
+        )
+        request_messages = context["messages"]
+        context_event = build_graph_event(
+            "context_built",
+            workflow_version=LANGGRAPH_V2_WORKFLOW_VERSION,
+            model_round=model_round + 1,
+            context_meta=context["context_meta"],
+        )
         try:
             response = llm.client.chat.completions.create(
                 model=llm.model,
@@ -239,10 +254,11 @@ def create_langgraph_v2_nodes(
                 "model_round": model_round + 1,
                 "deferred_feedback": [],
                 "graph_events": [
+                    context_event,
                     build_graph_event(
                         "model_error",
                         workflow_version=LANGGRAPH_V2_WORKFLOW_VERSION,
-                    )
+                    ),
                 ],
             }
 
@@ -280,11 +296,12 @@ def create_langgraph_v2_nodes(
                     "model_round": next_round,
                     "deferred_feedback": [],
                     "graph_events": [
+                        context_event,
                         build_graph_event(
                             "final_answer_accepted",
                             workflow_version=LANGGRAPH_V2_WORKFLOW_VERSION,
                             model_round=next_round,
-                        )
+                        ),
                     ],
                 }
 
@@ -313,11 +330,12 @@ def create_langgraph_v2_nodes(
                     "model_round": next_round,
                     "deferred_feedback": [],
                     "graph_events": [
+                        context_event,
                         build_graph_event(
                             "degraded_final_answer_accepted",
                             workflow_version=LANGGRAPH_V2_WORKFLOW_VERSION,
                             model_round=next_round,
-                        )
+                        ),
                     ],
                 }
 
@@ -363,10 +381,11 @@ def create_langgraph_v2_nodes(
                     "model_round": next_round,
                     "deferred_feedback": [],
                     "graph_events": [
+                        context_event,
                         build_graph_event(
                             "premature_final_stalled",
                             workflow_version=LANGGRAPH_V2_WORKFLOW_VERSION,
-                        )
+                        ),
                     ],
                 }
             return {
@@ -380,10 +399,11 @@ def create_langgraph_v2_nodes(
                 "model_round": next_round,
                 "deferred_feedback": [],
                 "graph_events": [
+                    context_event,
                     build_graph_event(
                         "premature_final_recovered",
                         workflow_version=LANGGRAPH_V2_WORKFLOW_VERSION,
-                    )
+                    ),
                 ],
             }
 
@@ -406,6 +426,7 @@ def create_langgraph_v2_nodes(
             "tool_cursor": 0,
             "model_round": next_round,
             "deferred_feedback": [],
+            "graph_events": [context_event],
         }
 
     # ------------------------------------------------------------- tool_gate
