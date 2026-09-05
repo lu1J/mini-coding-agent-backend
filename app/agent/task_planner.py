@@ -247,13 +247,18 @@ EXPLICIT_EDIT_PATTERNS = [
         r"实现|补充|重构|替换)"
     ),
     (
+        # Day20.5：句首前缀扩展 先/然后/接着/再 等分步引导词。
+        # 覆盖“先在 … 中新增一个函数”“然后在 … 中添加注释”
+        # 这类没有“请”字、路径又超过 {0,10} 窗口的分步写请求；
+        # 前缀后必须紧跟 (在|向|给) 位置词，分析句不会误入。
         r"^"
-        r"(请|帮我|麻烦|直接|现在|立即|需要你)?"
+        r"(请|帮我|麻烦|直接|现在|立即|需要你|"
+        r"先|首先|然后|接着|再|随后|并|并且)?"
         r"\s*"
         r"(在|向|给)"
         r".{1,120}"
         r"(添加|新增|增加|插入|追加|加入|"
-        r"加上|补上|写入|删除|移除)"
+        r"加上|补上|写入|创建|新建|删除|移除)"
     ),
     (
         # 支持“请在某个文件/类/函数的某个位置添加内容”。
@@ -289,16 +294,94 @@ EXPLICIT_EDIT_PATTERNS = [
         # 示例：
         # 在 User 类上方添加注释
         # 给 User 类增加字段
+        # 在 xxx.py 中新增一个函数
+        # 给 User 类新增 email 字段
         r"^(在|向|给)"
         r".{0,100}"
-        r"(添加|增加|插入|追加|加入|加上|补上|"
-        r"移除|删掉|删除)"
+        r"(添加|新增|增加|插入|追加|加入|加上|补上|"
+        r"创建|新建|写入|移除|删掉|删除)"
     ),
     (
         r"\b("
         r"fix|edit|modify|create|write|delete|"
         r"implement|refactor|replace|add|insert|append|remove"
         r")\b"
+    ),
+    (
+        # Day20.5 模式 9：点名工具名 + 执行动词 = 强写意图。
+        #
+        # 覆盖 eval 中“请调用 write_new_file 在 … 中创建新文件”、
+        # “请先读取 …, 然后用 edit_file 在该文件中添加新函数”、
+        # “请用 edit_file 把 … 改成 …” 这类句子 —— 原模式 1/2/3
+        # 要求动词紧跟句首“请”字，遇到“请调用/用 edit_file/先读取
+        # 长路径后添加”就会因窗口太窄而全部落空。
+        #
+        # 前置引导词可选，但动词与工具名必选：
+        # 只有“解释/说明/什么是 edit_file”这类没有执行动词的
+        # 句子不会命中（另有 TOOL_EXPLANATION_PATTERNS 双保险）。
+        r"(?:请|帮我|麻烦|先|首先|然后|接着|再|随后|"
+        r"直接|现在|立即|需要你|并|并且|同时)?\s*"
+        r"(?:调用|使用|用|通过|执行)\s*"
+        r"(?:edit_file|write_new_file)"
+    ),
+    (
+        # Day20.5 模式 10：把/将 + 长路径 + 强改义动词。
+        #
+        # eval case_root 前缀可达 60-90 字符（workspace/eval_cases/
+        # <run>/<task>/demo_project/…），原 {0,60} 窗口必然超窗。
+        # 长窗口只放“改成/改为/替换为/替换成”四个强改义词，
+        # 不放“添加/删除/新增”等弱动作，避免宽窗口误伤分析句；
+        # 同时用 [^。！？；\n] 防止窗口跨句吞掉无关内容。
+        r"(把|将)"
+        r"(?:[^。！？；\n]){0,150}?"
+        r"(?:改成|改为|替换为|替换成)"
+    ),
+]
+
+
+# ============================================================
+# “解释写工具”语境
+#
+# Day20.5 新增。用户提到 edit_file / write_new_file 时，
+# 多数情况是真实写请求（由 EXPLICIT_EDIT_PATTERNS 模式 9 捕获），
+# 但也有“解释 edit_file 是做什么的”“怎么调用 write_new_file”
+# 这类纯询问。本组模式用于把询问语境排除在写意图之外。
+#
+# 实现要点：
+# - 解释词与工具名之间若出现命令性引导词（请/然后/把/将…），
+#   说明后面是真命令句，不按解释语境排除（例如“请解释一下，
+#   然后用 edit_file 修改 config”）；
+# - “怎么/如何”类问句即使中间出现“调用/用”，仍是询问
+#   （“怎么调用 edit_file”不是执行请求），单独成组。
+# ============================================================
+
+TOOL_EXPLANATION_PATTERNS = [
+    (
+        r"(解释|介绍|说明|讲解|讲讲|科普|"
+        r"什么是|是什么|介绍一下|说说)"
+        r"(?:(?!(?:请|帮我|麻烦|然后|接着|随后|直接|"
+        r"现在|立即|需要你|把|将|并|并且|先|首先))"
+        r"[^。！？\n]){0,50}?"
+        r"(?:edit_file|write_new_file)"
+    ),
+    (
+        r"(怎么|如何|怎样|为什么|为啥|"
+        r"\bhow\b|\bwhy\b)"
+        r"(?:(?!(?:请|帮我|然后|接着|直接|现在|立即|"
+        r"需要你|把|将))[^。！？\n]){0,40}?"
+        r"(?:edit_file|write_new_file)"
+    ),
+    (
+        r"(?:edit_file|write_new_file)"
+        r"(?:(?!(?:修改|添加|创建|删除|改成|调用|"
+        r"使用|写入))[^。！？\n]){0,25}?"
+        r"(是做什么|是什么|干什么|干嘛|怎么用|如何用|"
+        r"的作用|的用途|用途|作用)"
+    ),
+    (
+        r"\b(what is|what does|explain|describe)\b"
+        r".{0,40}"
+        r"(?:edit_file|write_new_file)"
     ),
 ]
 
@@ -633,6 +716,24 @@ def is_analysis_only_edit_context(
     )
 
 
+def is_tool_explanation_context(
+    text: str,
+) -> bool:
+    """
+    判断文本是否处于“解释/询问 edit_file、write_new_file 工具”语境。
+
+    Day20.5：工具名本身不是写意图 ——
+    “解释 edit_file 是做什么的”只是询问；
+    只有工具名与执行动词/命令引导词组合出现时
+    （EXPLICIT_EDIT_PATTERNS 模式 9）才算真实写请求。
+    """
+
+    return matches_any_pattern(
+        text,
+        TOOL_EXPLANATION_PATTERNS,
+    )
+
+
 def is_explicit_edit_request(
     text: str,
 ) -> bool:
@@ -641,6 +742,11 @@ def is_explicit_edit_request(
 
     先识别明确命令；
     如果只是影响分析，则不算 edit。
+
+    Day20.5 增补：
+    - 明确点名 edit_file / write_new_file 并配合执行动词的句子
+      现在会被识别为写意图（模式 9）；
+    - 但“解释/询问工具用途”的句子即使带工具名也不判 edit。
     """
 
     if not contains_any_keyword(
@@ -655,6 +761,8 @@ def is_explicit_edit_request(
     )
 
     if explicit_request:
+        if is_tool_explanation_context(text):
+            return False
         return True
 
     if is_analysis_only_edit_context(text):
@@ -1555,6 +1663,29 @@ def estimate_task_complexity(
     return TASK_COMPLEXITY_SIMPLE
 
 
+def mentions_write_new_file_tool(
+    text: str | None,
+) -> bool:
+    """
+    用户是否明确点名 write_new_file 工具。
+
+    Day20.5：用户明确写“请调用 write_new_file 创建 …”时，
+    计划应推荐 write_new_file（而不是 edit_file），
+    与用户点名的工具保持一致。
+    """
+
+    if not text:
+        return False
+
+    return bool(
+        re.search(
+            r"write_new_file",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def estimate_tools_for_intents(
     intents: list[str],
     user_message: str = "",
@@ -1655,7 +1786,12 @@ def estimate_tools_for_intents(
                 "analyze_python_impact"
             )
 
-        if context["new_file_request"]:
+        if (
+            context["new_file_request"]
+            or mentions_write_new_file_tool(
+                user_message
+            )
+        ):
             tools.append(
                 "write_new_file"
             )
@@ -2019,7 +2155,12 @@ def build_steps_for_plan(
     # --------------------------------------------------------
 
     if TASK_INTENT_EDIT in intents:
-        if context["new_file_request"]:
+        if (
+            context["new_file_request"]
+            or mentions_write_new_file_tool(
+                user_message
+            )
+        ):
             append_step(
                 title="创建新文件",
                 description=(
