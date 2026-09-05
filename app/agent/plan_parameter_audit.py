@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.tools.file_tools import canonical_workspace_relative
+
 
 PARAMETER_AUDIT_VERSION = "1.0"
 
@@ -150,7 +152,13 @@ def flatten_string_values(value: Any) -> list[str]:
 def extract_planned_target_paths(
     task_plan: dict[str, Any] | None,
 ) -> list[str]:
-    """从 Task Planner 的 target_paths 中提取并标准化计划目标。"""
+    """从 Task Planner 的 target_paths 中提取并标准化计划目标。
+
+    Day20 P0：计划目标统一经过 canonical_workspace_relative 归一到
+    workspace 相对形式（Planner 输出的 "workspace/foo.py" 与工具侧
+    "foo.py" 将在此收敛），无法确认位于 workspace 内的条目直接丢弃
+    （写操作会因空计划范围而 fail closed）。
+    """
     if not task_plan:
         return []
 
@@ -161,10 +169,10 @@ def extract_planned_target_paths(
 
     return deduplicate_keep_order(
         [
-            normalized
+            canonical
             for raw_path in raw_paths
             if isinstance(raw_path, str)
-            if (normalized := normalize_audit_path(raw_path))
+            if (canonical := canonical_workspace_relative(raw_path))
         ]
     )
 
@@ -198,11 +206,15 @@ def path_matches_scope(
     target_paths 既可能是文件，也可能是目录：
     - 完全相同：匹配；
     - 实际路径位于计划目录下：匹配。
-    """
-    actual = normalize_audit_path(actual_path)
-    planned = normalize_audit_path(planned_path)
 
-    if not actual or not planned:
+    Day20 P0：双方都先经过 canonical_workspace_relative 归一，
+    避免 "workspace/foo.py" 与 "foo.py" 这类同义表述被误判为越界；
+    任何一方无法确认位于 workspace 内（含 ../ 越界）→ 不匹配。
+    """
+    actual = canonical_workspace_relative(actual_path)
+    planned = canonical_workspace_relative(planned_path)
+
+    if actual is None or planned is None:
         return False
 
     if actual == planned:
@@ -228,7 +240,10 @@ def command_mentions_target(
 ) -> bool:
     """使用标准化字符串判断命令中是否明确提到目标路径。"""
     normalized_command = normalize_command_text(command).lower()
-    normalized_target = normalize_audit_path(target_path).lower()
+    canonical_target = canonical_workspace_relative(target_path)
+    normalized_target = (
+        canonical_target.lower() if canonical_target is not None else ""
+    )
 
     return bool(
         normalized_command

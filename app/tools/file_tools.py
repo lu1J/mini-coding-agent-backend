@@ -1,4 +1,5 @@
 import difflib
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,83 @@ def safe_resolve_path(path: str) -> Path:
         raise ValueError("禁止访问 workspace 目录之外的路径")
 
     return target_path
+
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:(/|$)")
+
+
+def canonical_workspace_relative(raw_path: Any) -> str | None:
+    """
+    把「输入路径」统一成唯一的 canonical workspace 相对路径。
+
+    这是 Policy / Audit / 工具层共用的唯一路径归一化入口（Day20 P0）：
+
+        workspace/demo_project/main.py == demo_project/main.py == ./demo_project/main.py
+        workspace/eval_cases/<run>/<task>/demo_project/main.py
+            == eval_cases/<run>/<task>/demo_project/main.py
+
+    规则（全部为结构化处理，不做字符串替换）：
+    - 去掉引号/反引号与空白，\\ → /，折叠重复 //，折叠 ./ 与空段；
+    - 相对路径以 workspace 根目录同名段开头时视为「自指前缀」折叠掉；
+    - 剩余的 .. 若试图越出 workspace（段栈为空时遇到 ..）→ None；
+    - 绝对路径 / Windows 盘符 / UNC → 复用 safe_resolve_path 做真实
+      resolve + containment 检查，落在 workspace 内则转成相对形式；
+    - 空输入、无法确认在 workspace 内 → None（调用方按 fail closed 处理）。
+
+    安全语义：本函数只做结构归一 + 绝对路径 containment；符号链接越界
+    仍由 safe_resolve_path（工具实际访问文件前的物理防线）负责。
+    """
+    if raw_path is None:
+        return None
+
+    text = str(raw_path).strip().strip("`\"'")
+
+    if not text:
+        return None
+
+    text = text.replace("\\", "/")
+
+    while "//" in text:
+        text = text.replace("//", "/")
+
+    # 绝对 POSIX / Windows 盘符 / UNC：必须以 workspace 为锚做真实 containment。
+    if text.startswith("/") or _WINDOWS_DRIVE_RE.match(text):
+        try:
+            resolved = safe_resolve_path(text)
+        except (ValueError, OSError):
+            return None
+
+        try:
+            return resolved.relative_to(WORKSPACE_ROOT).as_posix()
+        except ValueError:
+            return None
+
+    segments = [part for part in text.split("/") if part not in ("", ".")]
+
+    if not segments:
+        return None
+
+    # workspace/ 自指前缀：首段与 workspace 根目录同名 → 折叠为锚点自身。
+    if segments[0] == WORKSPACE_ROOT.name:
+        segments = segments[1:]
+
+    if not segments:
+        return "."
+
+    stack: list[str] = []
+
+    for part in segments:
+        if part == "..":
+            if not stack:
+                return None  # 试图越出 workspace → fail closed
+            stack.pop()
+            continue
+        stack.append(part)
+
+    if not stack:
+        return "."
+
+    return "/".join(stack)
 
 
 def is_git_repo_root(path: Path) -> bool:

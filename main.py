@@ -64,6 +64,7 @@ from app.agent.langgraph_service import (
 )
 
 from app.agent.langgraph_v2_service import (
+    V2ThreadNotFoundError,
     get_fine_grained_graph_state,
     resume_fine_grained_graph,
     run_fine_grained_graph,
@@ -155,10 +156,22 @@ def agent_code_graph_v2_resume(
     使用相同 thread_id
     恢复 LangGraph v2 HITL interrupt。
     """
-    return resume_fine_grained_graph(
-        thread_id=thread_id,
-        approved=req.approved,
-    )
+    try:
+        return resume_fine_grained_graph(
+            thread_id=thread_id,
+            approved=req.approved,
+        )
+    except V2ThreadNotFoundError as exc:
+        # Day20 P1：不存在的 thread 必须快速失败（404），
+        # 而不是触发 langgraph 的 ghost run 长时间空跑。
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "type": "thread_not_found",
+                "thread_id": exc.thread_id,
+                "message": str(exc),
+            },
+        ) from exc
 
 
 @app.get(

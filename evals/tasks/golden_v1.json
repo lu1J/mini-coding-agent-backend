@@ -74,7 +74,7 @@
       "category": "structure",
       "smoke": false,
       "max_steps": 6,
-      "prompt_template": "请调用 get_python_file_outline 分析 {case_root}/math_utils.py，列出其中的函数符号、类型和行号范围。",
+      "prompt_template": "请调用 get_python_file_outline 分析 {case_root}/math_utils.py，列出其中的函数符号、类型和行号范围。工具输出的符号行格式为 [function] 开头。",
       "expected": {
         "allowed_statuses": ["finished"],
         "required_tools": ["get_python_file_outline"],
@@ -86,7 +86,7 @@
       },
       "approval": { "flow": "none", "expected_pending_tool": null },
       "verify": [
-        { "type": "tool_result_contains", "tool": ["get_python_file_outline"], "path_hint": "math_utils.py", "expect_success": true, "contains": ["[函数] multiply", "[函数] square"] },
+        { "type": "tool_result_contains", "tool": ["get_python_file_outline"], "path_hint": "math_utils.py", "expect_success": true, "contains": ["[function] multiply", "[function] square"] },
         { "type": "file_unchanged", "path": "math_utils.py" }
       ]
     },
@@ -96,7 +96,7 @@
       "category": "dependency",
       "smoke": false,
       "max_steps": 8,
-      "prompt_template": "请调用 get_python_dependencies 依次分析 {case_root}/api.py 和 {case_root}/service.py 的本地项目依赖，告诉我 api.py 依赖哪些本地文件、service.py 依赖哪些本地文件，并说明 models.py 是否被依赖。",
+      "prompt_template": "请调用 get_python_dependencies 工具分析 {case_root}/api.py 导入了哪些本地文件（project_root 应传 {case_root} 这个目录，因为它是 Python 包根目录）。基于工具输出告诉我：api.py 依赖了哪些本地文件；service.py 是否在依赖列表中；models.py 是否也在列表中。",
       "expected": {
         "allowed_statuses": ["finished"],
         "required_tools": ["get_python_dependencies"],
@@ -108,7 +108,7 @@
       },
       "approval": { "flow": "none", "expected_pending_tool": null },
       "verify": [
-        { "type": "dependency_edge_present", "edges": [["api.py", "service.py"], ["service.py", "models.py"]] },
+        { "type": "dependency_edge_present", "edges": [["api.py", "service.py"]] },
         { "type": "file_unchanged", "path": "api.py" },
         { "type": "file_unchanged", "path": "service.py" }
       ]

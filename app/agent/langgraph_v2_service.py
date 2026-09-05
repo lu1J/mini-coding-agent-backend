@@ -45,6 +45,20 @@ def open_v2_graph_checkpointer(
         connection.close()
 
 
+class V2ThreadNotFoundError(LookupError):
+    """resume 目标 thread 在 v2 checkpoint 中不存在。
+
+    Day20 P1：langgraph 1.x 对不存在的 thread 执行 Command(resume) 时，
+    会把它当作全新输入跑一遍完整 graph（ghost run，约 14-42 秒），
+    并顺带创建 checkpoint、真实执行工具。调用方应捕获本异常并快速
+    返回 404，而不是进入那条慢路径。
+    """
+
+    def __init__(self, thread_id: str):
+        super().__init__(f"找不到 v2 graph thread：{thread_id}")
+        self.thread_id = thread_id
+
+
 def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id}}
 
@@ -154,6 +168,13 @@ def resume_fine_grained_graph(
 
     runtime = _load_code_agent_runtime()
     with open_v2_graph_checkpointer(db_path) as checkpointer:
+        # Day20 P1：先探测 checkpoint 是否存在。thread 不存在时快速抛错，
+        # 绝不进入 graph.invoke（langgraph 会把 ghost resume 当成全新 run，
+        # 长时间执行完整 agent 并写入 checkpoint / 触发真实工具副作用）。
+        existing_checkpoint = checkpointer.get_tuple(_config(thread_id))
+        if existing_checkpoint is None:
+            raise V2ThreadNotFoundError(thread_id)
+
         graph = build_fine_grained_graph(checkpointer=checkpointer, **runtime)
         raw_result = graph.invoke(
             Command(resume={"approved": approved}),
