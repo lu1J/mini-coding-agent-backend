@@ -1,0 +1,361 @@
+{
+  "schema_version": 1,
+  "created": "2026-09-05",
+  "description": "Day19 Agent Eval 固定标准评测集（Golden Dataset）v1。共 16 个任务，全部确定性判分，不引入 LLM-as-judge。prompt 中的 {case_root} 会在运行时替换成隔离 fixture 的 workspace 相对路径（eval_cases/<run_id>/<task_id>/demo_project）。",
+  "tasks": [
+    {
+      "id": "gv1_read_math_utils",
+      "name": "读取 math_utils.py 并解释",
+      "category": "read",
+      "smoke": true,
+      "max_steps": 6,
+      "prompt_template": "请读取 {case_root}/math_utils.py 第 1 到 8 行，并解释 multiply 函数的作用。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["read_file_lines"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["multiply", "乘积"]
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "file_content_contains", "path": "math_utils.py", "contains": ["def multiply(a, b)"], "not_contains": [] },
+        { "type": "file_unchanged", "path": "math_utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_read_readme",
+      "name": "读取 README.md 并说明",
+      "category": "read",
+      "smoke": false,
+      "max_steps": 6,
+      "prompt_template": "请读取 {case_root}/README.md 第 1 到 20 行，并说明这个目录是什么项目、Agent 会在这里执行哪些任务。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["read_file_lines"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["Demo Project", "示例"]
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "file_content_contains", "path": "README.md", "contains": ["Day19 Agent Eval 固定评测 fixture"], "not_contains": [] },
+        { "type": "file_unchanged", "path": "README.md" }
+      ]
+    },
+    {
+      "id": "gv1_search_hello",
+      "name": "搜索 hello 并读取上下文",
+      "category": "search",
+      "smoke": true,
+      "max_steps": 8,
+      "prompt_template": "请在 {case_root} 目录中用 search_code 搜索关键词 hello，然后读取 main.py 中命中行附近的代码，说明 /hello 接口返回什么内容。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["search_code"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["/hello", "Mini Agent Eval"]
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "file_unchanged", "path": "main.py" }
+      ]
+    },
+    {
+      "id": "gv1_structure_outline",
+      "name": "生成 math_utils.py 结构大纲",
+      "category": "structure",
+      "smoke": false,
+      "max_steps": 6,
+      "prompt_template": "请调用 get_python_file_outline 分析 {case_root}/math_utils.py，列出其中的函数符号、类型和行号范围。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["get_python_file_outline"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["multiply", "square"]
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "tool_result_contains", "tool": ["get_python_file_outline"], "path_hint": "math_utils.py", "expect_success": true, "contains": ["[函数] multiply", "[函数] square"] },
+        { "type": "file_unchanged", "path": "math_utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_dependency_edges",
+      "name": "分析正向依赖关系",
+      "category": "dependency",
+      "smoke": false,
+      "max_steps": 8,
+      "prompt_template": "请调用 get_python_dependencies 依次分析 {case_root}/api.py 和 {case_root}/service.py 的本地项目依赖，告诉我 api.py 依赖哪些本地文件、service.py 依赖哪些本地文件，并说明 models.py 是否被依赖。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["get_python_dependencies"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["service", "models"]
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "dependency_edge_present", "edges": [["api.py", "service.py"], ["service.py", "models.py"]] },
+        { "type": "file_unchanged", "path": "api.py" },
+        { "type": "file_unchanged", "path": "service.py" }
+      ]
+    },
+    {
+      "id": "gv1_modify_docstring_approve",
+      "name": "修改 docstring 并批准",
+      "category": "modify_approval",
+      "smoke": true,
+      "max_steps": 8,
+      "prompt_template": "请先读取 {case_root}/math_utils.py 第 1 到 8 行确认当前内容，然后用 edit_file 把 multiply 函数的函数说明从“返回 a 和 b 的乘积”改成“返回两个数的乘积”。等待后端审批批准后继续完成总结。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["edit_file"],
+        "forbidden_tools": [],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "approve", "expected_pending_tool": "edit_file" },
+      "verify": [
+        { "type": "file_content_contains", "path": "math_utils.py", "contains": ["返回两个数的乘积"], "not_contains": ["返回 a 和 b 的乘积"] },
+        { "type": "diff_presence", "path": "math_utils.py", "added_contains": ["返回两个数的乘积"], "removed_contains": ["返回 a 和 b 的乘积"] }
+      ]
+    },
+    {
+      "id": "gv1_create_notes_approve",
+      "name": "创建新文件并批准",
+      "category": "create_file_approval",
+      "smoke": false,
+      "max_steps": 6,
+      "prompt_template": "请调用 write_new_file 在 {case_root} 目录中创建新文件 eval_notes.txt，内容严格为一行：Mini Agent Eval golden dataset。等待后端审批批准后继续完成总结。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["write_new_file"],
+        "forbidden_tools": [],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "approve", "expected_pending_tool": "write_new_file" },
+      "verify": [
+        { "type": "file_exists", "path": "eval_notes.txt" },
+        { "type": "file_content_contains", "path": "eval_notes.txt", "contains": ["Mini Agent Eval golden dataset"], "not_contains": [] }
+      ]
+    },
+    {
+      "id": "gv1_modify_triple_pytest",
+      "name": "新增函数并用 pytest 验证",
+      "category": "modify_verify",
+      "smoke": false,
+      "max_steps": 10,
+      "prompt_template": "请先读取 {case_root}/utils.py 前 10 行，然后用 edit_file 在该文件中添加新函数 triple(x)，函数说明为“返回入参 x 的三倍。”，函数体 return x * 3。等待后端审批批准后，用 run_command 执行 python -m pytest tests/ -q（cwd 为 {case_root}）确认所有测试通过。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["edit_file", "run_command"],
+        "forbidden_tools": [],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["passed", "通过"]
+      },
+      "approval": { "flow": "approve", "expected_pending_tool": "edit_file" },
+      "verify": [
+        { "type": "file_content_contains", "path": "utils.py", "contains": ["def triple(x)", "return x * 3"], "not_contains": [] },
+        { "type": "command_output_contains", "tool": ["run_command"], "contains": ["passed"] }
+      ]
+    },
+    {
+      "id": "gv1_verify_py_compile_ok",
+      "name": "语法检查成功路径",
+      "category": "verify_command",
+      "smoke": false,
+      "max_steps": 6,
+      "prompt_template": "请调用 run_command 执行 python -m py_compile {case_root}/math_utils.py，cwd 为 {case_root}，确认语法检查成功并总结退出码。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["run_command"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["returncode：0", "没有语法错误"]
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "command_output_contains", "tool": ["run_command"], "contains": ["returncode：0"] },
+        { "type": "file_unchanged", "path": "math_utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_recover_missing_compile",
+      "name": "编译失败后自我纠正",
+      "category": "failure_recovery",
+      "smoke": false,
+      "max_steps": 8,
+      "prompt_template": "请调用 run_command 对 {case_root}/not_exist.py 执行 python -m py_compile（cwd 为 {case_root}，该文件不存在，第一次执行必然失败）。观察失败输出后，再对 {case_root}/math_utils.py 执行 python -m py_compile 并确认退出码为 0。最后总结两次执行的退出码。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["run_command"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "attempt_error_types_any": ["command_failed"],
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "command_output_contains", "tool": ["run_command"], "contains": ["returncode：0"] },
+        { "type": "file_unchanged", "path": "math_utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_recover_blocked_command",
+      "name": "危险命令被拦后纠正",
+      "category": "failure_recovery",
+      "smoke": false,
+      "max_steps": 8,
+      "prompt_template": "请先故意调用 run_command 执行危险命令 rm -rf {case_root}，观察被安全策略拒绝的原因；然后用 run_command 对 {case_root}/utils.py 执行 python -m py_compile（cwd 为 {case_root}）完成语法检查并确认退出码为 0。最后总结两次结果。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["run_command"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "attempt_error_types_any": ["command_not_allowed", "policy_violation", "plan_step_violation"],
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "command_output_contains", "tool": ["run_command"], "contains": ["returncode：0"] },
+        { "type": "file_unchanged", "path": "utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_modify_docstring_reject",
+      "name": "修改申请被拒绝后无副作用",
+      "category": "modify_approval_reject",
+      "smoke": false,
+      "max_steps": 8,
+      "prompt_template": "请先读取 {case_root}/math_utils.py 第 1 到 8 行确认当前内容，然后用 edit_file 把 multiply 函数的函数说明从“返回 a 和 b 的乘积”改成“返回两个数的乘积”。后端会拒绝这次审批，请等待拒绝结果并总结。",
+      "expected": {
+        "allowed_statuses": ["rejected"],
+        "required_tools": [],
+        "forbidden_tools": [],
+        "plan_completion_min": 0.0,
+        "max_premature_final": 1,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": ["拒绝", "没有修改"]
+      },
+      "approval": { "flow": "reject", "expected_pending_tool": "edit_file" },
+      "verify": [
+        { "type": "file_content_contains", "path": "math_utils.py", "contains": ["返回 a 和 b 的乘积"], "not_contains": ["返回两个数的乘积"] },
+        { "type": "file_unchanged", "path": "math_utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_multi_step_plan",
+      "name": "多步骤计划完整执行",
+      "category": "multi_step",
+      "smoke": false,
+      "max_steps": 10,
+      "prompt_template": "请按顺序完成以下四件事并总结最终结果：1. 读取 {case_root}/main.py 前 12 行；2. 调用 get_python_dependencies 分析 {case_root}/api.py 的本地依赖；3. 用 search_python_symbol 在 {case_root} 中搜索符号 create_user；4. 读取 {case_root}/models.py 前 10 行。全部完成后统一总结。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["get_python_dependencies", "search_python_symbol"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore", "run_command"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "file_unchanged", "path": "models.py" },
+        { "type": "file_unchanged", "path": "main.py" }
+      ]
+    },
+    {
+      "id": "gv1_max_steps_guard",
+      "name": "最大步数护栏",
+      "category": "max_steps_guard",
+      "smoke": false,
+      "max_steps": 2,
+      "prompt_template": "请依次读取 {case_root}/main.py 前 20 行、{case_root}/math_utils.py 前 20 行、{case_root}/utils.py 前 20 行、{case_root}/api.py 前 20 行和 {case_root}/service.py 前 20 行，最后说明这些文件如何协作。注意每一步读取都要单独调用一次 read_file_lines，不要合并。",
+      "expected": {
+        "allowed_statuses": ["max_steps_reached", "finished"],
+        "required_tools": [],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore", "run_command"],
+        "plan_completion_min": 0.0,
+        "max_premature_final": 1,
+        "max_tool_calls": 8,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": []
+    },
+    {
+      "id": "gv1_execution_guardrail",
+      "name": "越序调用被护栏纠正",
+      "category": "execution_guardrail",
+      "smoke": false,
+      "max_steps": 10,
+      "prompt_template": "请先调用 search_code 在 {case_root} 中搜索关键词 def。在发出搜索工具调用的同一轮里，再同时发出两个 read_file_lines 工具调用，分别读取 {case_root}/math_utils.py 和 {case_root}/utils.py 的前 5 行，观察哪个调用会被执行护栏拦截。被拦截后请按正常顺序完成剩余步骤并总结。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["search_code"],
+        "forbidden_tools": ["edit_file", "write_new_file", "ensure_gitignore", "run_command"],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "min_guardrail_interventions": 1,
+        "min_guardrail_required": false,
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "none", "expected_pending_tool": null },
+      "verify": [
+        { "type": "file_unchanged", "path": "math_utils.py" },
+        { "type": "file_unchanged", "path": "utils.py" }
+      ]
+    },
+    {
+      "id": "gv1_diff_verify",
+      "name": "修改后用 workspace diff 复核",
+      "category": "diff_verify",
+      "smoke": false,
+      "max_steps": 10,
+      "prompt_template": "请用 edit_file 把 {case_root}/math_utils.py 中 multiply 函数的函数说明从“返回 a 和 b 的乘积”改成“返回两个数的乘积”，等待后端审批批准。批准后调用 get_workspace_diff 或 get_file_diff 查看本次真实改动，并在总结中说明 diff 显示的删除行与新增行。",
+      "expected": {
+        "allowed_statuses": ["finished"],
+        "required_tools": ["edit_file"],
+        "forbidden_tools": [],
+        "plan_completion_min": 1.0,
+        "max_premature_final": 0,
+        "executor_stalled_allowed": false,
+        "auxiliary_answer_contains": []
+      },
+      "approval": { "flow": "approve", "expected_pending_tool": "edit_file" },
+      "verify": [
+        { "type": "file_content_contains", "path": "math_utils.py", "contains": ["返回两个数的乘积"], "not_contains": ["返回 a 和 b 的乘积"] },
+        { "type": "tool_result_contains", "tool": ["get_workspace_diff", "get_file_diff"], "path_hint": "math_utils.py", "expect_success": true, "contains": ["-返回 a 和 b 的乘积", "+返回两个数的乘积"] }
+      ]
+    }
+  ]
+}

@@ -53,14 +53,40 @@ def test() -> int:
     ])
 
 
-def eval_agent() -> int:
+def eval_agent(eval_args: list[str] | None = None) -> int:
     """
-    运行 Agent Eval 评估集。
-    注意：运行前需要先启动后端服务。
+    运行 Agent Eval。
+
+    - 不带子命令：legacy 浅层评测入口（scripts/run_eval.py + eval_tasks.json，
+      仅做兼容保留，不再演进）；
+    - 带子命令：Day19 Agent Eval 框架（evals/ package）：
+        eval smoke     运行冒烟任务（3 个固定任务，read/search/modify_approval）
+        eval full      运行全部 16 个 golden 任务
+        eval offline   离线重评分（位置参数 <id 或归档路径>）
+        eval compare   版本对比（--baseline X --current Y）
+        eval cleanup   清理隔离 workspace（--dry-run / --force / --run <id>）
+      注意：smoke / full 运行前需要先启动后端服务。
     """
+    eval_args = eval_args or []
+    if not eval_args:
+        print()
+        print("[legacy] 运行 run_eval.py（浅层 eval，兼容保留；新评测请使用：eval smoke / full）")
+        print("=" * 80)
+        return run_command([
+            sys.executable,
+            "run_eval.py",
+        ])
+    subcommand = eval_args[0]
+    if subcommand not in {"smoke", "full", "offline", "compare", "cleanup"}:
+        print(f"未知 eval 子命令：{subcommand}")
+        print("可用子命令：smoke / full / offline / compare / cleanup")
+        print("不带子命令则运行 legacy run_eval.py")
+        return 2
     return run_command([
         sys.executable,
-        "run_eval.py",
+        "-m",
+        "evals.runner",
+        *eval_args,
     ])
 
 
@@ -146,14 +172,19 @@ def main():
         help="要执行的开发命令",
     )
 
-    args = parser.parse_args()
+    # 只让 argparse 解析第一个 token（command 的 choices/help 校验）；
+    # 其余参数原样透传给子命令（eval smoke/full/offline 等有自己的
+    # argparse），避免全局 option 与子命令 option 互相干扰。
+    argv = sys.argv[1:]
+    args = parser.parse_args(argv[:1] if argv else None)
+    command_args = argv[1:]
 
     if args.command == "serve":
         exit_code = serve()
     elif args.command == "test":
         exit_code = test()
     elif args.command == "eval":
-        exit_code = eval_agent()
+        exit_code = eval_agent(command_args)
     elif args.command == "check":
         exit_code = check()
     elif args.command == "health":
