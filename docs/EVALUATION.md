@@ -1,5 +1,8 @@
 # Agent Eval 评估说明
 
+> Day21 文档状态：当前入口为 evals/，golden_v1.json 含 16 个任务、12 项指标，支持 Evidence、offline 重评分与 compare。命令见 [README](../README.md#agent-eval-运行)。下文仅为 legacy run_eval.py 历史说明与当时结果，不代表当前数据集或稳定成功率。
+
+
 本文档说明 Mini Coding Agent Backend 当前的 Agent Eval 评估设计。
 
 Agent Eval 的目标是验证 CodeAgent 是否能够稳定完成一组标准任务，而不是只凭单次对话感觉判断效果。

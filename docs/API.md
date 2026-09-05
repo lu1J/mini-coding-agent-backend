@@ -1,5 +1,8 @@
 # API 文档
 
+> Day21 文档状态：当前另有 POST /agent/code/graph/v2、POST /agent/code/graph/v2/{thread_id}/resume、GET /agent/code/graph/v2/{thread_id}/state；不存在的 v2 thread 恢复返回 404。当前接口以 main.py 与 /docs 为准，示例见 [README](../README.md#主要-api)。下文保留旧接口说明。
+
+
 本文档说明 Mini Coding Agent Backend 当前提供的主要接口。
 
 服务默认地址：

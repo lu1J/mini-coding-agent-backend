@@ -1,36 +1,31 @@
-# Git
-.git
-.gitignore
-
-# Local environment
-.env
+# Secrets and local configuration (the template is documentation only)
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/.git
 .venv
 venv
-
-# Python cache
-__pycache__
-*.pyc
-*.pyo
-.pytest_cache
-.mypy_cache
-
-# IDE
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+.coverage*
+htmlcov
 .idea
 .vscode
-
-# Runtime data
-workspace/.agent_runs
-workspace/.agent_pending
-workspace/.conversations
-workspace/demo_project
+.claude
+.codex
+.agents
+# Exclude all user code, checkpoints, approvals, eval cases and run evidence.
+workspace
+**/*.sqlite3*
+**/*.db
+**/*.log
+**/*.tmp
+**/*.bak
 eval_result.json
-
-# Temporary files
-*.log
-*.tmp
-*.bak
 body_stream.json
-
-# OS files
 .DS_Store
 Thumbs.db

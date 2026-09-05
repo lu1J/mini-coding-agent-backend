@@ -59,9 +59,9 @@ def test_real_stdio_subprocess_list_tools():
     assert "project_overview" in names
 
 
-def test_real_stdio_subprocess_call_tool():
+def test_real_stdio_subprocess_call_tool(mcp_project_root):
     async def run():
-        params = stdio_server_parameters()
+        params = stdio_server_parameters(project_root=mcp_project_root)
         async with open_mcp_client(params) as client:
             result = await call_tool(client, "project_overview", {})
         return result

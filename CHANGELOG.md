@@ -12,6 +12,26 @@ MAJOR.MINOR.PATCH
 
 ---
 
+## Unreleased — Day21 工程化收尾
+
+- 重构中文 README：真实 v2 架构、安全边界、16 任务 / 12 指标评估与三条 Demo 路径。
+- Docker 使用 Python 3.13、Git、非 root 用户、健康检查及 workspace volume；移除构建期 Demo 初始化。
+- 完善 .dockerignore，排除整个 workspace、环境文件和缓存。
+- 新增 push / pull_request CI：安装依赖、pip check、pytest；不调用真实模型 Eval。
+- 补充测试隔离夹具，消除真实 workspace 写入和 MCP 对本地 Demo 的依赖；保留 stdio 集成测试。
+- 更新路线图和工程说明。未修改 Agent Runtime、Planner / Executor / Policy 或评估指标。
+- 本地 pytest：383 passed；Docker Runtime 不可用，未真实构建镜像。
+
+## 已实现能力补记（Day20 及之前，非本轮新增）
+
+- Planner / Executor 步骤约束、Policy Guard、人工审批、Verified Change / Verification / Rollback、Reflection。
+- LangGraph v1 / v2 并行入口、独立 SQLite checkpoint、Context Builder 请求侧压缩。
+- 本地只读 MCP Server / Client / Bridge 与独立 Runtime 装配。
+- golden_v1.json：16 个任务、12 项指标、文件证据、offline 重评分、compare。
+- workspace 路径 canonicalization、不存在 v2 thread resume 返回 404、明确写意图识别。
+
+以下版本条目记录当时行为，不代表当前架构；当前入口与边界以 README 和代码为准。
+
 ## v0.6.0 - Task Planner 任务规划器
 
 ### 新增功能

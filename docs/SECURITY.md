@@ -1,5 +1,8 @@
 # 安全机制说明
 
+> Day21 文档状态：当前已加入 Executor、Policy Guard、路径 canonicalization、Verified Change 和 v2 thread 恢复校验。见 [README 安全设计](../README.md#安全设计)。下文保留早期设计，命令白名单不是操作系统沙箱，未知风险也非一律 fail closed。
+
+
 本文档说明 Mini Coding Agent Backend 当前实现的主要安全机制。
 
 由于本项目是一个 Coding Agent，Agent 具备读取代码、搜索代码、运行命令、创建文件和修改文件的能力，因此必须对工具调用进行严格限制。

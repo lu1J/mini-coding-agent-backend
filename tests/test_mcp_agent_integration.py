@@ -290,14 +290,14 @@ def test_default_v2_blocks_mcp_tool_without_registration(monkeypatch):
 
 
 def test_registered_mcp_supporting_call_full_trace(
-    monkeypatch, mcp_registered
+    monkeypatch, mcp_registered, mcp_project_root
 ):
     """真实 stdio 子进程：mcp_demo_project_overview 以 supporting 身份放行。"""
     plan = make_plan([make_step(0, "读取文件", "read_file")])
     read_tool, read_calls = make_read_file_tool()
     mcp_callable = build_sync_callable(
         original_tool_name="project_overview",
-        connect_target=stdio_server_parameters(),
+        connect_target=stdio_server_parameters(project_root=mcp_project_root),
     )
     graph = build_graph(
         monkeypatch=monkeypatch,

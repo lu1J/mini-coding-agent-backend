@@ -1,5 +1,8 @@
 # Agent 架构说明
 
+> Day21 文档状态：本文保留早期原生 Loop 说明。当前已实现 Executor、Policy、Verified Change、LangGraph v2、SQLite、Context Builder 和 MCP。最新图见 [README](../README.md#核心架构)，下文早期限制不作为当前 TODO。
+
+
 本文档说明 Mini Coding Agent Backend 的整体架构设计。
 
 本项目不是简单的聊天机器人，而是一个基于 Tool Calling 和 Agent Loop 的后端 Coding Agent 原型系统。
